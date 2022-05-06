@@ -19,7 +19,7 @@
 #include "velox/connectors/WriteProtocol.h"
 #include "velox/core/Expressions.h"
 
-#include "velox/vector/arrow/Bridge.h"
+#include "velox/vector/arrow/c/Bridge.h"
 
 namespace facebook::velox::core {
 
