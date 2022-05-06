@@ -13,7 +13,7 @@
 # limitations under the License.
 
 add_library(
-  velox_aggregates OBJECT
+  velox_aggregates
   AggregateNames.h
   ApproxDistinctAggregate.cpp
   ApproxMostFrequentAggregate.cpp
@@ -21,6 +21,7 @@ add_library(
   ArbitraryAggregate.cpp
   ArrayAggAggregate.cpp
   AverageAggregate.cpp
+  AverageAggregate.h
   BitwiseAggregates.cpp
   BoolAggregates.cpp
   CountIfAggregate.cpp
@@ -34,6 +35,7 @@ add_library(
   MinMaxAggregates.cpp
   MinMaxByAggregates.cpp
   CountAggregate.cpp
+  CountAggregate.h
   PrestoHasher.cpp
   SingleValueAccumulator.cpp
   SumAggregate.cpp
