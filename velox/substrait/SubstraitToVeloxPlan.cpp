@@ -418,7 +418,8 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
     u_int32_t& index,
     std::vector<std::string>& paths,
     std::vector<u_int64_t>& starts,
-    std::vector<u_int64_t>& lengths) {
+    std::vector<u_int64_t>& lengths,
+    int& fileFormat) {
   // Check if the ReadRel specifies an input of stream. If yes, the pre-built
   // input node will be used as the data source.
   auto streamIdx = streamIsInput(sRead);
@@ -454,6 +455,7 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
     starts.reserve(fileList.size());
     lengths.reserve(fileList.size());
     for (const auto& file : fileList) {
+      fileFormat = file.format();
       // Expect all Partitions share the same index.
       index = file.partition_index();
       paths.emplace_back(file.uri_file());
@@ -531,7 +533,7 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
     return toVeloxPlan(sRel.join());
   }
   if (sRel.has_read()) {
-    return toVeloxPlan(sRel.read(), partitionIndex_, paths_, starts_, lengths_);
+    return toVeloxPlan(sRel.read(), partitionIndex_, paths_, starts_, lengths_, fileFormat_);
   }
   VELOX_NYI("Substrait conversion not supported for Rel.");
 }
