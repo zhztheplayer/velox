@@ -14,21 +14,23 @@
  * limitations under the License.
  */
 
-#include "velox/functions/prestosql/aggregates/MinMaxAggregates.h"
+#include <limits>
+#include "velox/exec/Aggregate.h"
+#include "velox/exec/AggregationHook.h"
+#include "velox/expression/FunctionSignature.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
+#include "velox/functions/prestosql/aggregates/SimpleNumericAggregate.h"
+#include "velox/functions/prestosql/aggregates/SingleValueAccumulator.h"
 
-namespace facebook::velox::aggregate::prestosql {
-
-namespace {
+namespace facebook::velox::aggregate {
 
 template <typename T>
 struct MinMaxTrait : public std::numeric_limits<T> {};
 
 template <>
 struct MinMaxTrait<Timestamp> {
-  static constexpr Timestamp lowest() {
-    return Timestamp(
-        MinMaxTrait<int64_t>::lowest(), MinMaxTrait<uint64_t>::lowest());
+  static constexpr Timestamp min() {
+    return Timestamp(MinMaxTrait<int64_t>::min(), MinMaxTrait<uint64_t>::min());
   }
 
   static constexpr Timestamp max() {
@@ -38,23 +40,12 @@ struct MinMaxTrait<Timestamp> {
 
 template <>
 struct MinMaxTrait<Date> {
-  static constexpr Date lowest() {
-    return Date(std::numeric_limits<int32_t>::lowest());
+  static constexpr Date min() {
+    return Date(std::numeric_limits<int32_t>::min());
   }
 
   static constexpr Date max() {
     return Date(std::numeric_limits<int32_t>::max());
-  }
-};
-
-template <>
-struct MinMaxTrait<IntervalDayTime> {
-  static constexpr IntervalDayTime lowest() {
-    return IntervalDayTime(std::numeric_limits<int64_t>::lowest());
-  }
-
-  static constexpr IntervalDayTime max() {
-    return IntervalDayTime(std::numeric_limits<int64_t>::max());
   }
 };
 
@@ -67,10 +58,6 @@ class MinMaxAggregate : public SimpleNumericAggregate<T, T, T> {
 
   int32_t accumulatorFixedWidthSize() const override {
     return sizeof(T);
-  }
-
-  int32_t accumulatorAlignmentSize() const override {
-    return 1;
   }
 
   void extractValues(char** groups, int32_t numGroups, VectorPtr* result)
@@ -89,15 +76,6 @@ class MinMaxAggregate : public SimpleNumericAggregate<T, T, T> {
         });
   }
 };
-
-/// Override 'accumulatorAlignmentSize' for UnscaledLongDecimal values as it
-/// uses int128_t type. Some CPUs don't support misaligned access to int128_t
-/// type.
-template <>
-inline int32_t MinMaxAggregate<UnscaledLongDecimal>::accumulatorAlignmentSize()
-    const {
-  return static_cast<int32_t>(sizeof(UnscaledLongDecimal));
-}
 
 // Truncate timestamps to milliseconds precision.
 template <>
@@ -167,11 +145,7 @@ class MaxAggregate : public MinMaxAggregate<T> {
         group,
         rows,
         args[0],
-        [](T& result, T value) {
-          if (result < value) {
-            result = value;
-          }
-        },
+        [](T& result, T value) { result = result > value ? result : value; },
         [](T& result, T value, int /* unused */) { result = value; },
         mayPushdown,
         kInitialValue_);
@@ -186,11 +160,8 @@ class MaxAggregate : public MinMaxAggregate<T> {
   }
 
  private:
-  static const T kInitialValue_;
+  static constexpr T kInitialValue_{MinMaxTrait<T>::min()};
 };
-
-template <typename T>
-const T MaxAggregate<T>::kInitialValue_ = MinMaxTrait<T>::lowest();
 
 template <typename T>
 class MinAggregate : public MinMaxAggregate<T> {
@@ -262,11 +233,8 @@ class MinAggregate : public MinMaxAggregate<T> {
   }
 
  private:
-  static const T kInitialValue_;
+  static constexpr T kInitialValue_{MinMaxTrait<T>::max()};
 };
-
-template <typename T>
-const T MinAggregate<T>::kInitialValue_ = MinMaxTrait<T>::max();
 
 class NonNumericMinMaxAggregateBase : public exec::Aggregate {
  public:
@@ -284,6 +252,10 @@ class NonNumericMinMaxAggregateBase : public exec::Aggregate {
     for (auto i : indices) {
       new (groups[i] + offset_) SingleValueAccumulator();
     }
+  }
+
+  void finalize(char** /* groups */, int32_t /* numGroups */) override {
+    // Nothing to do
   }
 
   void extractValues(char** groups, int32_t numGroups, VectorPtr* result)
@@ -473,7 +445,7 @@ class NonNumericMinAggregate : public NonNumericMinMaxAggregateBase {
 };
 
 template <template <typename T> class TNumeric, typename TNonNumeric>
-bool registerMinMax(const std::string& name) {
+bool registerMinMaxAggregate(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures;
   signatures.push_back(exec::AggregateFunctionSignatureBuilder()
                            .typeVariable("T")
@@ -492,8 +464,6 @@ bool registerMinMax(const std::string& name) {
         VELOX_CHECK_EQ(argTypes.size(), 1, "{} takes only one argument", name);
         auto inputType = argTypes[0];
         switch (inputType->kind()) {
-          case TypeKind::BOOLEAN:
-            return std::make_unique<TNumeric<bool>>(resultType);
           case TypeKind::TINYINT:
             return std::make_unique<TNumeric<int8_t>>(resultType);
           case TypeKind::SMALLINT:
@@ -510,12 +480,6 @@ bool registerMinMax(const std::string& name) {
             return std::make_unique<TNumeric<Timestamp>>(resultType);
           case TypeKind::DATE:
             return std::make_unique<TNumeric<Date>>(resultType);
-          case TypeKind::INTERVAL_DAY_TIME:
-            return std::make_unique<TNumeric<IntervalDayTime>>(resultType);
-          case TypeKind::LONG_DECIMAL:
-            return std::make_unique<TNumeric<UnscaledLongDecimal>>(resultType);
-          case TypeKind::SHORT_DECIMAL:
-            return std::make_unique<TNumeric<UnscaledShortDecimal>>(resultType);
           case TypeKind::VARCHAR:
           case TypeKind::ARRAY:
           case TypeKind::MAP:
@@ -531,11 +495,4 @@ bool registerMinMax(const std::string& name) {
       });
 }
 
-} // namespace
-
-void registerMinMaxAggregates(const std::string& prefix) {
-  registerMinMax<MinAggregate, NonNumericMinAggregate>(prefix + kMin);
-  registerMinMax<MaxAggregate, NonNumericMaxAggregate>(prefix + kMax);
-}
-
-} // namespace facebook::velox::aggregate::prestosql
+} // namespace facebook::velox::aggregate
