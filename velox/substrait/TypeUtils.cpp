@@ -15,7 +15,10 @@
  */
 
 #include "velox/substrait/TypeUtils.h"
+<<<<<<< HEAD
 #include "velox/type/Type.h"
+=======
+>>>>>>> [OPPRO-104] Support more cases of filter and its pushdown (#14)
 
 namespace facebook::velox::substrait {
 std::vector<std::string_view> getTypesFromCompoundName(
