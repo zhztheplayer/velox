@@ -32,14 +32,14 @@ class ArrowStream : public SourceOperator {
   BlockingReason isBlocked(ContinueFuture* /* unused */) override {
     return BlockingReason::kNotBlocked;
   }
-
   void noMoreInput() override {
     Operator::noMoreInput();
     close();
   }
 
-  bool isFinished() override;
+  const char* GetError();
 
+  bool isFinished() override;
   void close() override;
 
  private:
