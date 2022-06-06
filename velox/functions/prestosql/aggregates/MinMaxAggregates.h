@@ -14,12 +14,15 @@
  * limitations under the License.
  */
 
-#include "velox/functions/prestosql/aggregates/MinMaxAggregates.h"
+#include <limits>
+#include "velox/exec/Aggregate.h"
+#include "velox/exec/AggregationHook.h"
+#include "velox/expression/FunctionSignature.h"
 #include "velox/functions/prestosql/aggregates/AggregateNames.h"
+#include "velox/functions/prestosql/aggregates/SimpleNumericAggregate.h"
+#include "velox/functions/prestosql/aggregates/SingleValueAccumulator.h"
 
-namespace facebook::velox::aggregate::prestosql {
-
-namespace {
+namespace facebook::velox::aggregate {
 
 template <typename T>
 struct MinMaxTrait : public std::numeric_limits<T> {};
@@ -492,11 +495,4 @@ bool registerMinMaxAggregate(const std::string& name) {
       });
 }
 
-} // namespace
-
-void registerMinMaxAggregates() {
-  registerMinMaxAggregate<MinAggregate, NonNumericMinAggregate>(kMin);
-  registerMinMaxAggregate<MaxAggregate, NonNumericMaxAggregate>(kMax);
-}
-
-} // namespace facebook::velox::aggregate::prestosql
+} // namespace facebook::velox::aggregate
