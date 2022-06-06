@@ -38,7 +38,7 @@ class SubstraitParser {
   };
 
   /// Used to parse Substrait NamedStruct.
-  std::vector<std::shared_ptr<SubstraitParser::SubstraitType>> parseNamedStruct(
+  std::vector<std::shared_ptr<SubstraitType>> parseNamedStruct(
       const ::substrait::NamedStruct& namedStruct);
 
   /// Used to parse Substrait Type.
@@ -93,7 +93,10 @@ class SubstraitParser {
   /// a mapping relation should be added here.
   std::unordered_map<std::string, std::string> substraitVeloxFunctionMap_ = {
       {"add", "plus"},
-      {"subtract", "minus"}};
+      {"subtract", "minus"},
+      {"ends_with", "endswith"},
+      {"starts_with", "startswith"},
+      {"equal", "eq"}};
 };
 
 } // namespace facebook::velox::substrait

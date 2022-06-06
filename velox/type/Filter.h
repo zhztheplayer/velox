@@ -40,6 +40,7 @@ enum class FilterKind {
   kBigintValuesUsingHashTable,
   kBigintValuesUsingBitmask,
   kDoubleRange,
+  kDoubleValues,
   kFloatRange,
   kBytesRange,
   kBytesValues,
@@ -539,6 +540,22 @@ class BigintRange final : public Filter {
         upper16_(std::min<int64_t>(upper, std::numeric_limits<int16_t>::max())),
         isSingleValue_(upper_ == lower_) {}
 
+  BigintRange(int64_t lower,
+      bool lowerUnbounded,
+      bool lowerExclusive,
+      int64_t upper,
+      bool upperUnbounded,
+      bool upperExclusive,
+      bool nullAllowed)
+    : Filter(true, nullAllowed, FilterKind::kBigintRange),
+      lower_(lowerExclusive ? lower - 1 : lower),
+      upper_(upperExclusive ? upper + 1 : upper),
+      lower32_(std::max<int64_t>(lower, std::numeric_limits<int32_t>::min())),
+      upper32_(std::min<int64_t>(upper, std::numeric_limits<int32_t>::max())),
+      lower16_(std::max<int64_t>(lower, std::numeric_limits<int16_t>::min())),
+      upper16_(std::min<int64_t>(upper, std::numeric_limits<int16_t>::max())),
+      isSingleValue_(upper_ == lower_) {}
+
   std::unique_ptr<Filter> clone(
       std::optional<bool> nullAllowed = std::nullopt) const final {
     if (nullAllowed) {
@@ -756,6 +773,61 @@ class BigintValuesUsingBitmask final : public Filter {
   std::vector<bool> bitmask_;
   const int64_t min_;
   const int64_t max_;
+};
+
+/// IN-list filter for double data types.
+/// A quick implementation with force int conversion.
+class DoubleValues final : public Filter {
+ public:
+  /// @param min Minimum value.
+  /// @param max Maximum value.
+  /// @param values A list of unique values that pass the filter. Must contain
+  /// at least two entries.
+  /// @param nullAllowed Null values are passing the filter if true.
+  DoubleValues(
+      double min,
+      double max,
+      const std::vector<double>& values,
+      bool nullAllowed);
+
+  DoubleValues(
+      const DoubleValues& other,
+      bool nullAllowed)
+      : Filter(true, nullAllowed, FilterKind::kDoubleValues),
+        bitmask_(other.bitmask_),
+        min_(other.min_),
+        max_(other.max_) {}
+
+  std::unique_ptr<Filter> clone(
+      std::optional<bool> nullAllowed = std::nullopt) const final {
+    if (nullAllowed) {
+      return std::make_unique<DoubleValues>(
+          *this, nullAllowed.value());
+    } else {
+      return std::make_unique<DoubleValues>(*this);
+    }
+  }
+
+  std::vector<double> values() const;
+
+  bool testDouble(double value) const final;
+
+  bool testDoubleRange(double min, double max, bool hasNull) const final;
+
+  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
+
+ private:
+  std::unique_ptr<Filter>
+  mergeWith(double min, double max, const Filter* other) const;
+  
+  int64_t toInt64(double value) const {
+    int64_t converted = (int64_t)(value + 0.5);
+    return converted;
+  }
+
+  std::vector<bool> bitmask_;
+  const double min_;
+  const double max_;
 };
 
 /// Base class for range filters on floating point and string data types.
@@ -1291,6 +1363,13 @@ class MultiRange final : public Filter {
         filters_(std::move(filters)),
         nanAllowed_(nanAllowed) {}
 
+  MultiRange(
+    std::vector<std::unique_ptr<Filter>> filters,
+    bool nullAllowed)
+    : Filter(true, nullAllowed, FilterKind::kMultiRange),
+      filters_(std::move(filters)),
+      nanAllowed_(true) {}      
+
   std::unique_ptr<Filter> clone(
       std::optional<bool> nullAllowed = std::nullopt) const final;
 
@@ -1354,6 +1433,10 @@ static inline bool applyFilter(TFilter& filter, StringView value) {
 // Creates a hash or bitmap based IN filter depending on value distribution.
 std::unique_ptr<Filter> createBigintValues(
     const std::vector<int64_t>& values,
+    bool nullAllowed);
+
+std::unique_ptr<Filter> createDoubleValues(
+    const std::vector<double>& values,
     bool nullAllowed);
 
 } // namespace facebook::velox::common
