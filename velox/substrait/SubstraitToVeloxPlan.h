@@ -22,6 +22,23 @@
 
 namespace facebook::velox::substrait {
 
+struct SplitInfo {
+  /// The Partition index.
+  u_int32_t partitionIndex;
+
+  /// The file paths to be scanned.
+  std::vector<std::string> paths;
+
+  /// The file starts in the scan.
+  std::vector<u_int64_t> starts;
+
+  /// The lengths to be scanned.
+  std::vector<u_int64_t> lengths;
+
+  /// The file format of the files to be scanned.
+  dwio::common::FileFormat format;
+};
+
 /// This class is used to convert the Substrait plan into Velox plan.
 class SubstraitVeloxPlanConverter {
  public:
@@ -52,10 +69,7 @@ class SubstraitVeloxPlanConverter {
   /// Lengths: the lengths in byte to read from the items.
   std::shared_ptr<const core::PlanNode> toVeloxPlan(
       const ::substrait::ReadRel& sRead,
-      u_int32_t& index,
-      std::vector<std::string>& paths,
-      std::vector<u_int64_t>& starts,
-      std::vector<u_int64_t>& lengths);
+      std::shared_ptr<SplitInfo>& splitInfo);
 
   /// Used to convert Substrait Rel into Velox PlanNode.
   std::shared_ptr<const core::PlanNode> toVeloxPlan(
@@ -79,24 +93,10 @@ class SubstraitVeloxPlanConverter {
     return functionMap_;
   }
 
-  /// Will return the index of Partition to be scanned.
-  u_int32_t getPartitionIndex() {
-    return partitionIndex_;
-  }
-
-  /// Will return the paths of the files to be scanned.
-  const std::vector<std::string>& getPaths() {
-    return paths_;
-  }
-
-  /// Will return the starts of the files to be scanned.
-  const std::vector<u_int64_t>& getStarts() {
-    return starts_;
-  }
-
-  /// Will return the lengths to be scanned for each file.
-  const std::vector<u_int64_t>& getLengths() {
-    return lengths_;
+  /// Return the splitInfo map used by this plan converter.
+  const std::unordered_map<core::PlanNodeId, std::shared_ptr<SplitInfo>>&
+  splitInfos() const {
+    return splitInfoMap_;
   }
 
   /// Used to insert certain plan node as input. The plan node
@@ -347,24 +347,16 @@ class SubstraitVeloxPlanConverter {
       const std::shared_ptr<const core::PlanNode>& childNode,
       const core::AggregationNode::Step& aggStep);
 
-  /// The Partition index.
-  u_int32_t partitionIndex_;
-
-  /// The file paths to be scanned.
-  std::vector<std::string> paths_;
-
-  /// The file starts in the scan.
-  std::vector<u_int64_t> starts_;
-
-  /// The lengths to be scanned.
-  std::vector<u_int64_t> lengths_;
-
   /// The unique identification for each PlanNode.
   int planNodeId_ = 0;
 
   /// The map storing the relations between the function id and the function
   /// name. Will be constructed based on the Substrait representation.
   std::unordered_map<uint64_t, std::string> functionMap_;
+
+  /// The map storing the split stats for each PlanNode.
+  std::unordered_map<core::PlanNodeId, std::shared_ptr<SplitInfo>>
+      splitInfoMap_;
 
   /// The map storing the pre-built plan nodes which can be accessed through
   /// index. This map is only used when the computation of a Substrait plan
