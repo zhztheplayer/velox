@@ -150,6 +150,18 @@ void TaskCursor::start() {
   }
 }
 
+ContinueFuture TaskCursor::cancel() {
+  if (cancelled) {
+    return ContinueFuture(true);
+  }
+  cancelled = true;
+  queue_->close();
+  if (task_ && !atEnd_) {
+    return task_->requestCancel();
+  }
+  return ContinueFuture(true);
+}
+
 bool TaskCursor::moveNext() {
   start();
   current_ = queue_->dequeue();

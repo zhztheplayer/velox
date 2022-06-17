@@ -104,14 +104,14 @@ class TaskCursor {
   explicit TaskCursor(const CursorParameters& params);
 
   ~TaskCursor() {
-    queue_->close();
-    if (task_ && !atEnd_) {
-      task_->requestCancel();
-    }
+    cancel();
   }
 
   /// Starts the task if not started yet.
   void start();
+
+  /// Stop this cursor by canceling the task.
+  ContinueFuture cancel();
 
   /// Fetches another batch from the task queue.
   /// Starts the task if not started yet.
@@ -132,6 +132,7 @@ class TaskCursor {
   const int32_t numConcurrentSplitGroups_;
   const int32_t numSplitGroups_;
   bool started_ = false;
+  bool cancelled  = false;
   std::shared_ptr<TaskQueue> queue_;
   std::shared_ptr<exec::Task> task_;
   RowVectorPtr current_;
