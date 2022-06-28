@@ -60,14 +60,10 @@ class SubstraitVeloxPlanConverter {
       const ::substrait::AggregateRel& sAgg);
 
   /// Convert Substrait ProjectRel into Velox PlanNode.
-  core::PlanNodePtr toVeloxPlan(
-      const ::substrait::ProjectRel& projectRel,
-      memory::MemoryPool* pool);
+  core::PlanNodePtr toVeloxPlan(const ::substrait::ProjectRel& projectRel);
 
   /// Convert Substrait FilterRel into Velox PlanNode.
-  core::PlanNodePtr toVeloxPlan(
-      const ::substrait::FilterRel& filterRel,
-      memory::MemoryPool* pool);
+  core::PlanNodePtr toVeloxPlan(const ::substrait::FilterRel& filterRel);
 
   /// Convert Substrait ReadRel into Velox Values Node.
   core::PlanNodePtr toVeloxPlan(
@@ -94,12 +90,12 @@ class SubstraitVeloxPlanConverter {
 
   /// Used to convert Substrait Plan into Velox PlanNode.
   std::shared_ptr<const core::PlanNode> toVeloxPlan(
-      const ::substrait::Plan& sPlan);
+      const ::substrait::Plan& substraitPlan);
 
   /// Used to construct the function map between the index
   /// and the Substrait function name. Initialize the expression
   /// converter based on the constructed function map.
-  void constructFuncMap(const ::substrait::Plan& sPlan);
+  void constructFunctionMap(const ::substrait::Plan& substraitPlan);
 
   /// Will return the function map used by this plan converter.
   const std::unordered_map<uint64_t, std::string>& getFunctionMap() {
@@ -339,19 +335,10 @@ class SubstraitVeloxPlanConverter {
       const std::vector<::substrait::Expression_ScalarFunction>&
           remainingFunctions);
 
-  /// Used to check if some of the input columns of Aggregation
-  /// should be combined into a single column. Currently, this case occurs in
-  /// final Average. The phase of Aggregation will also be set.
-  bool needsRowConstruct(
+  /// Set the phase of Aggregation.
+  void setPhase(
       const ::substrait::AggregateRel& sAgg,
       core::AggregationNode::Step& aggStep);
-
-  /// Used to convert AggregateRel into Velox plan node.
-  /// This method will add a Project node before Aggregation to combine columns.
-  std::shared_ptr<const core::PlanNode> toVeloxAggWithRowConstruct(
-      const ::substrait::AggregateRel& sAgg,
-      const std::shared_ptr<const core::PlanNode>& childNode,
-      const core::AggregationNode::Step& aggStep);
 
   /// Used to convert AggregateRel into Velox plan node.
   /// The output of child node will be used as the input of Aggregation.

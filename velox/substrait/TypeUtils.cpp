@@ -15,10 +15,7 @@
  */
 
 #include "velox/substrait/TypeUtils.h"
-<<<<<<< HEAD
 #include "velox/type/Type.h"
-=======
->>>>>>> [OPPRO-104] Support more cases of filter and its pushdown (#14)
 
 namespace facebook::velox::substrait {
 std::vector<std::string_view> getTypesFromCompoundName(
@@ -122,8 +119,6 @@ TypePtr toVeloxType(const std::string& typeName) {
     }
     case TypeKind::UNKNOWN:
       return UNKNOWN();
-    case TypeKind::DATE:
-      return DATE();
     default:
       VELOX_NYI("Velox type conversion not supported for type {}.", typeName);
   }

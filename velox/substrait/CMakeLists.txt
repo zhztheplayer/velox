@@ -47,7 +47,7 @@ set(SRCS
     SubstraitParser.cpp
     SubstraitToVeloxExpr.cpp
     SubstraitToVeloxPlan.cpp
-    TypeUtils.cpp
+    TypeUtils.cpp_out
     SubstraitExtensionCollector.cpp
     VeloxToSubstraitExpr.cpp
     VeloxToSubstraitPlan.cpp

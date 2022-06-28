@@ -39,7 +39,12 @@ class FunctionTest : public ::testing::Test {
       std::make_shared<vestrait::SubstraitParser>();
 
   std::shared_ptr<vestrait::SubstraitVeloxPlanConverter> planConverter_ =
-      std::make_shared<vestrait::SubstraitVeloxPlanConverter>();
+      std::make_shared<vestrait::SubstraitVeloxPlanConverter>(
+          memoryPool_.get());
+
+ private:
+  std::unique_ptr<memory::MemoryPool> memoryPool_{
+      memory::getDefaultScopedMemoryPool()};
 };
 
 TEST_F(FunctionTest, makeNames) {
@@ -95,27 +100,36 @@ TEST_F(FunctionTest, constructFunctionMap) {
   std::string function = planConverter_->findFunction(1);
   ASSERT_EQ(function, "lte:fp64_fp64");
 
-  function = planConverter_->findFunction(2);
+  function = planConverter_->findFuncSpec(2);
   ASSERT_EQ(function, "and:bool_bool");
 
-  function = planConverter_->findFunction(3);
+  function = planConverter_->findFuncSpec(3);
   ASSERT_EQ(function, "subtract:opt_fp64_fp64");
 
-  function = planConverter_->findFunction(4);
+  function = planConverter_->findFuncSpec(4);
   ASSERT_EQ(function, "multiply:opt_fp64_fp64");
 
-  function = planConverter_->findFunction(5);
+  function = planConverter_->findFuncSpec(5);
   ASSERT_EQ(function, "add:opt_fp64_fp64");
 
-  function = planConverter_->findFunction(6);
+  function = planConverter_->findFuncSpec(6);
   ASSERT_EQ(function, "sum:opt_fp64");
 
   function = planConverter_->findFunction(7);
   ASSERT_EQ(function, "count:opt_fp64");
 
-  function = planConverter_->findFunction(8);
+  function = planConverter_->findFuncSpec(8);
   ASSERT_EQ(function, "count:opt_i32");
 
   function = planConverter_->findFunction(9);
   ASSERT_EQ(function, "is_not_null:fp64");
+}
+
+TEST_F(FunctionTest, streamIsInput) {
+  std::string planPath =
+      getDataFilePath("velox/substrait/tests", "data/read_second_stage.json");
+  ::substrait::Rel substraitRel;
+  JsonToProtoConverter::readFromFile(planPath, substraitRel);
+  int index = planConverter_->streamIsInput(substraitRel.read());
+  ASSERT_EQ(index, 0);
 }
