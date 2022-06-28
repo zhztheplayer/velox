@@ -359,39 +359,59 @@ core::PlanNodePtr SubstraitVeloxPlanConverter::toVeloxPlan(
 }
 
 std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
-    const ::substrait::ReadRel& sRead,
-    u_int32_t& index,
-    std::vector<std::string>& paths,
-    std::vector<u_int64_t>& starts,
-    std::vector<u_int64_t>& lengths) {
+    const ::substrait::ReadRel& sRead) {
   // Check if the ReadRel specifies an input of stream. If yes, the pre-built
   // input node will be used as the data source.
+  auto splitInfo = std::make_shared<SplitInfo>();
   auto streamIdx = streamIsInput(sRead);
   if (streamIdx >= 0) {
     if (inputNodesMap_.find(streamIdx) == inputNodesMap_.end()) {
       VELOX_FAIL(
           "Could not find source index {} in input nodes map.", streamIdx);
     }
-    return inputNodesMap_[streamIdx];
+    auto streamNode = inputNodesMap_[streamIdx];
+    splitInfo->isStream = true;
+    splitInfoMap_[streamNode->id()] = splitInfo;
+    return streamNode;
   }
 
-  // Parse local files
-  if (readRel.has_local_files()) {
-    const auto& fileList = readRel.local_files().items();
+  // Otherwise, will create TableScan node for ReadRel.
+  // Get output names and types.
+  std::vector<std::string> colNameList;
+  std::vector<TypePtr> veloxTypeList;
+  if (sRead.has_base_schema()) {
+    const auto& baseSchema = sRead.base_schema();
+    colNameList.reserve(baseSchema.names().size());
+    for (const auto& name : baseSchema.names()) {
+      colNameList.emplace_back(name);
+    }
+    auto substraitTypeList = subParser_->parseNamedStruct(baseSchema);
+    veloxTypeList.reserve(substraitTypeList.size());
+    for (const auto& substraitType : substraitTypeList) {
+      veloxTypeList.emplace_back(toVeloxType(substraitType->type));
+    }
+  }
+
+  // Parse local files and construct split info.
+  if (sRead.has_local_files()) {
+    using SubstraitFileFormatCase =
+        ::substrait::ReadRel_LocalFiles_FileOrFiles::FileFormatCase;
+    const auto& fileList = sRead.local_files().items();
     splitInfo->paths.reserve(fileList.size());
     splitInfo->starts.reserve(fileList.size());
     splitInfo->lengths.reserve(fileList.size());
     for (const auto& file : fileList) {
-      // Expect all files to share the same index.
+      // Expect all Partitions share the same index.
       splitInfo->partitionIndex = file.partition_index();
       splitInfo->paths.emplace_back(file.uri_file());
       splitInfo->starts.emplace_back(file.start());
       splitInfo->lengths.emplace_back(file.length());
-      switch (file.format()) {
-        case 0:
+      switch (file.file_format_case()) {
+        case SubstraitFileFormatCase::kOrc:
+        case SubstraitFileFormatCase::kDwrf:
           splitInfo->format = dwio::common::FileFormat::DWRF;
           break;
-        case 1:
+        case SubstraitFileFormatCase::kParquet:
           splitInfo->format = dwio::common::FileFormat::PARQUET;
           break;
         default:
@@ -399,7 +419,6 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
       }
     }
   }
-
   // Do not hard-code connector ID and allow for connectors other than Hive.
   static const std::string kHiveConnectorId = "test-hive";
 
@@ -408,6 +427,7 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
   std::shared_ptr<connector::hive::HiveTableHandle> tableHandle;
   if (!sRead.has_filter()) {
     tableHandle = std::make_shared<connector::hive::HiveTableHandle>(
+        kHiveConnectorId,
         "hive_table",
         filterPushdownEnabled,
         connector::hive::SubfieldFilters{},
@@ -415,23 +435,50 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
   } else {
     // Flatten the conditions connected with 'and'.
     std::vector<::substrait::Expression_ScalarFunction> scalarFunctions;
-    flattenConditions(sRead.filter(), scalarFunctions);
+    std::vector<::substrait::Expression_SingularOrList> singularOrLists;
+    flattenConditions(sRead.filter(), scalarFunctions, singularOrLists);
 
-    // Separate the filters to be two parts. The first part can be pushed
-    // down.
+    std::unordered_map<uint32_t, std::shared_ptr<RangeRecorder>> rangeRecorders;
+    for (uint32_t idx = 0; idx < veloxTypeList.size(); idx++) {
+      rangeRecorders[idx] = std::make_shared<RangeRecorder>();
+    }
+
+    // Separate the filters to be two parts. The subfield part can be
+    // pushed down.
     std::vector<::substrait::Expression_ScalarFunction> subfieldFunctions;
+    std::vector<::substrait::Expression_SingularOrList> subfieldrOrLists;
+
     std::vector<::substrait::Expression_ScalarFunction> remainingFunctions;
-    separateFilters(scalarFunctions, subfieldFunctions, remainingFunctions);
+    std::vector<::substrait::Expression_SingularOrList> remainingrOrLists;
 
-    // Create the filters to be pushed down.
-    connector::hive::SubfieldFilters subfieldFilters =
-        toSubfieldFilters(colNameList, veloxTypeList, subfieldFunctions);
+    separateFilters(
+        rangeRecorders,
+        scalarFunctions,
+        subfieldFunctions,
+        remainingFunctions,
+        singularOrLists,
+        subfieldrOrLists,
+        remainingrOrLists);
 
+    // Create subfield filters based on the constructed filter info map.
+    connector::hive::SubfieldFilters subfieldFilters = toSubfieldFilters(
+        colNameList, veloxTypeList, subfieldFunctions, subfieldrOrLists);
     // Connect the remaining filters with 'and'.
-    std::shared_ptr<const core::ITypedExpr> remainingFilter =
-        connectWithAnd(colNameList, veloxTypeList, remainingFunctions);
+    std::shared_ptr<const core::ITypedExpr> remainingFilter;
+
+    if (!isPushDownSupportedByFormat(splitInfo->format, subfieldFilters)) {
+      // A subfieldFilter is not supported by the format,
+      // mark all filter as remaining filters.
+      subfieldFilters.clear();
+      remainingFilter = connectWithAnd(
+          colNameList, veloxTypeList, scalarFunctions, singularOrLists);
+    } else {
+      remainingFilter = connectWithAnd(
+          colNameList, veloxTypeList, remainingFunctions, remainingrOrLists);
+    }
 
     tableHandle = std::make_shared<connector::hive::HiveTableHandle>(
+        kHiveConnectorId,
         "hive_table",
         filterPushdownEnabled,
         std::move(subfieldFilters),
@@ -444,7 +491,7 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
   std::unordered_map<std::string, std::shared_ptr<connector::ColumnHandle>>
       assignments;
   for (int idx = 0; idx < colNameList.size(); idx++) {
-    auto outName = substraitParser_->makeNodeName(planNodeId_, idx);
+    auto outName = subParser_->makeNodeName(planNodeId_, idx);
     assignments[outName] = std::make_shared<connector::hive::HiveColumnHandle>(
         colNameList[idx],
         connector::hive::HiveColumnHandle::ColumnType::kRegular,
@@ -453,19 +500,19 @@ std::shared_ptr<const core::PlanNode> SubstraitVeloxPlanConverter::toVeloxPlan(
   }
   auto outputType = ROW(std::move(outNames), std::move(veloxTypeList));
 
-  if (readRel.has_virtual_table()) {
-    return toVeloxPlan(readRel, pool, outputType);
+  if (sRead.has_virtual_table()) {
+    return toVeloxPlan(sRead, outputType);
   } else {
     auto tableScanNode = std::make_shared<core::TableScanNode>(
         nextPlanNodeId(), outputType, tableHandle, assignments);
+    // Set split info map.
+    splitInfoMap_[tableScanNode->id()] = splitInfo;
     return tableScanNode;
   }
-} // namespace facebook::velox::substrait
-} // namespace facebook::velox::substrait
+}
 
 core::PlanNodePtr SubstraitVeloxPlanConverter::toVeloxPlan(
     const ::substrait::ReadRel& readRel,
-    memory::MemoryPool* pool,
     const RowTypePtr& type) {
   ::substrait::ReadRel_VirtualTable readVirtualTable = readRel.virtual_table();
   int64_t numVectors = readVirtualTable.values_size();
@@ -508,11 +555,11 @@ core::PlanNodePtr SubstraitVeloxPlanConverter::toVeloxPlan(
         }
       }
       children.emplace_back(
-          setVectorFromVariants(outputChildType, batchChild, pool));
+          setVectorFromVariants(outputChildType, batchChild, pool_));
     }
 
     vectors.emplace_back(
-        std::make_shared<RowVector>(pool, type, nullptr, batchSize, children));
+        std::make_shared<RowVector>(pool_, type, nullptr, batchSize, children));
   }
   return std::make_shared<core::ValuesNode>(nextPlanNodeId(), vectors);
 }
