@@ -420,7 +420,7 @@ bool isPushDownSupportedByFormat(
     case dwio::common::FileFormat::PARQUET: {
       for (const auto& filter : subfieldFilters) {
         switch (filter.second->kind()) {
-          // see ParquetReader.cpp#175
+          // see ParquetReader.cpp:175
 
           // supported
           case common::FilterKind::kBigintRange:
