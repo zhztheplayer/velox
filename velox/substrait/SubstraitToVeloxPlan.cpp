@@ -431,7 +431,7 @@ bool isPushDownSupportedByFormat(
           case common::FilterKind::kBigintValuesUsingHashTable:
             break;
 
-            // not supported
+          // not supported
           case common::FilterKind::kAlwaysFalse:
           case common::FilterKind::kAlwaysTrue:
           case common::FilterKind::kIsNull:
