@@ -78,8 +78,8 @@ function install_protobuf {
   cd protobuf-21.4
   ./configure --prefix=/usr
   make "-j$(nproc)"
-  make install
-  ldconfig
+  sudo make install
+  sudo ldconfig
 }
 
 function install_velox_deps {
