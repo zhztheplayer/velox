@@ -78,14 +78,8 @@ function install_fmt {
   cmake_install -DFMT_TEST=OFF
 }
 
-function install_folly {
-  github_checkout facebook/folly "${FB_OS_VERSION}"
-  cmake_install -DBUILD_TESTS=OFF
-}
-
 function install_velox_deps {
   run_and_time install_fmt
-  run_and_time install_folly
 }
 
 (return 2> /dev/null) && return # If script was sourced, don't run commands.
