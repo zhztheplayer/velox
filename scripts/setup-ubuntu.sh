@@ -88,7 +88,7 @@ function install_protobuf {
   tar -xzf protobuf-all-21.4.tar.gz
   cd protobuf-21.4
   ./configure \
-      CXXFLAGS="-fPIC"
+      CXXFLAGS="-fPIC" \
       --prefix=/usr
   make "-j$(nproc)"
   sudo make install
