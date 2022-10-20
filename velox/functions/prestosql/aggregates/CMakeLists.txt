@@ -21,7 +21,6 @@ add_library(
   ArbitraryAggregate.cpp
   ArrayAggAggregate.cpp
   AverageAggregate.cpp
-  AverageAggregate.h
   BitwiseAggregates.cpp
   BoolAggregates.cpp
   CountIfAggregate.cpp
@@ -34,10 +33,8 @@ add_library(
   MapUnionAggregate.cpp
   MapUnionSumAggregate.cpp
   MinMaxAggregates.cpp
-  MinMaxAggregates.h
   MinMaxByAggregates.cpp
   CountAggregate.cpp
-  CountAggregate.h
   PrestoHasher.cpp
   SingleValueAccumulator.cpp
   SumAggregate.cpp

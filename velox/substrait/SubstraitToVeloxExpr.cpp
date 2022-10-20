@@ -16,9 +16,10 @@
 
 #include "velox/substrait/SubstraitToVeloxExpr.h"
 #include "velox/substrait/TypeUtils.h"
-
+#include "velox/substrait/VariantToVectorConverter.h"
 #include "velox/substrait/VectorCreater.h"
 #include "velox/vector/FlatVector.h"
+#include "velox/vector/VariantToVector.h"
 using namespace facebook::velox;
 namespace {
 // Get values for the different supported types.
@@ -157,6 +158,7 @@ bool isNullOnFailure(
 
 } // namespace
 
+using facebook::velox::core::variantArrayToVector;
 namespace facebook::velox::substrait {
 
 std::shared_ptr<const core::FieldAccessTypedExpr>
@@ -269,7 +271,7 @@ SubstraitVeloxExprConverter::literalsToConstantExpr(
     const std::vector<::substrait::Expression::Literal>& literals) {
   std::vector<variant> variants;
   variants.reserve(literals.size());
-  VELOX_CHECK(literals.size() > 0, "List should have at least one item.");
+  VELOX_CHECK_GE(literals.size(), 0, "List should have at least one item.");
   std::optional<TypePtr> literalType = std::nullopt;
   for (const auto& literal : literals) {
     auto veloxVariant = toVeloxExpr(literal)->value();
@@ -279,14 +281,11 @@ SubstraitVeloxExprConverter::literalsToConstantExpr(
     variants.emplace_back(veloxVariant);
   }
   VELOX_CHECK(literalType.has_value(), "Type expected.");
-  // Create flat vector from the variants.
-  VectorPtr vector =
-      setVectorFromVariants(literalType.value(), variants, pool_);
-  // Create array vector from the flat vector.
-  ArrayVectorPtr arrayVector =
-      toArrayVector(literalType.value(), vector, pool_);
+  auto varArray = variant::array(variants);
+  ArrayVectorPtr arrayVector = variantArrayToVector(varArray.array(), pool_);
   // Wrap the array vector into constant vector.
-  auto constantVector = BaseVector::wrapInConstant(1, 0, arrayVector);
+  auto constantVector =
+      BaseVector::wrapInConstant(1 /*length*/, 0 /*index*/, arrayVector);
   return std::make_shared<const core::ConstantTypedExpr>(constantVector);
 }
 
@@ -449,7 +448,7 @@ std::shared_ptr<const core::ITypedExpr>
 SubstraitVeloxExprConverter::toVeloxExpr(
     const ::substrait::Expression::Cast& castExpr,
     const RowTypePtr& inputType) {
-  auto substraitType = substraitParser_.parseType(castExpr.type());
+  auto substraitType = subParser_->parseType(castExpr.type());
   auto type = toVeloxType(substraitType->type);
   bool nullOnFailure = isNullOnFailure(castExpr.failure_behavior());
 

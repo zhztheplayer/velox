@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#include "velox/functions/prestosql/aggregates/MinMaxAggregates.h"
 #include <limits>
 #include "velox/exec/Aggregate.h"
 #include "velox/exec/AggregationHook.h"
