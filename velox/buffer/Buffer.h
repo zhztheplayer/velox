@@ -184,7 +184,7 @@ class Buffer {
   // compiler can inline it, so we make it only called in the debug build.
   void setEndGuard() {
 #ifndef NDEBUG
-    setEndGuardImpl();
+//    setEndGuardImpl();
 #endif
   }
 
@@ -192,7 +192,7 @@ class Buffer {
 
   void checkEndGuard() const {
 #ifndef NDEBUG
-    checkEndGuardImpl();
+//    checkEndGuardImpl();
 #endif
   }
 
