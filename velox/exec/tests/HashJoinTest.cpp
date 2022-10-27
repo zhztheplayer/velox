@@ -1883,7 +1883,6 @@ TEST_P(MultiThreadedHashJoinTest, antiJoin) {
       .referenceQuery(
           "SELECT t.* FROM t WHERE NOT EXISTS (SELECT * FROM u WHERE u.u0 = t.t0)")
       .run();
-
   std::vector<std::string> filters({"u1 > t1", "u1 * t1 > 0"});
   for (const std::string& filter : filters) {
     HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
