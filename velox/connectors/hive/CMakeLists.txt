@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_library(velox_hive_connector OBJECT HiveConnector.cpp HiveDataSink.cpp
+add_library(velox_hive_connector HiveConnector.cpp HiveDataSink.cpp
                                         FileHandle.cpp HiveWriteProtocol.cpp)
 
 target_link_libraries(velox_hive_connector velox_connector velox_dwio_common_exception
