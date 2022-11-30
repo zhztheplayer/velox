@@ -238,7 +238,7 @@ SubstraitVeloxExprConverter::toExtractExpr(
     auto iter = extractDatetimeFunctionMap_.find(from);
     if (iter != extractDatetimeFunctionMap_.end()) {
       return std::make_shared<const core::CallTypedExpr>(
-        outputType, std::move(exprParams), iter->second);
+          outputType, std::move(exprParams), iter->second);
     } else {
       VELOX_NYI("Extract from {} not supported.", from);
     }
