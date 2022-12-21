@@ -17,7 +17,6 @@
 #include "velox/substrait/SubstraitToVeloxExpr.h"
 #include "velox/substrait/TypeUtils.h"
 #include "velox/substrait/VariantToVectorConverter.h"
-#include "velox/substrait/VectorCreater.h"
 #include "velox/vector/FlatVector.h"
 #include "velox/vector/VariantToVector.h"
 using namespace facebook::velox;
@@ -355,15 +354,6 @@ SubstraitVeloxExprConverter::toVeloxExpr(
       // parsed.
       return std::make_shared<core::ConstantTypedExpr>(
           variant(Date(substraitLit.date())));
-    case ::substrait::Expression_Literal::LiteralTypeCase::kList: {
-      // Literals in List are put in a constant vector.
-      std::vector<::substrait::Expression::Literal> literals;
-      literals.reserve(substraitLit.list().values().size());
-      for (const auto& literal : substraitLit.list().values()) {
-        literals.emplace_back(literal);
-      }
-      return literalsToConstantExpr(literals);
-    }
     case ::substrait::Expression_Literal::LiteralTypeCase::kVarChar:
       return std::make_shared<core::ConstantTypedExpr>(
           VARCHAR(), variant(substraitLit.var_char().value()));
@@ -416,7 +406,7 @@ ArrayVectorPtr SubstraitVeloxExprConverter::literalsToArrayVector(
           listLiteral, childSize, VARCHAR(), pool_));
     case ::substrait::Expression_Literal::LiteralTypeCase::kNull: {
       auto veloxType =
-          toVeloxType(substraitParser_.parseType(listLiteral.null())->type);
+          toVeloxType(subParser_->parseType(listLiteral.null())->type);
       auto kind = veloxType->kind();
       return makeArrayVector(VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
           constructFlatVector, kind, listLiteral, childSize, veloxType, pool_));
