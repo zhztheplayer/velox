@@ -267,7 +267,7 @@ bool testFilters(
     if (child->filter()) {
       const auto& name = child->fieldName();
       if (!rowType->containsChild(name)) {
-        if (child->constantValue() != nullptr) {
+        if (child->isConstant()) {
           // Column is missing from reader but set by constant value.
           // We are not sure if filter will accept the constant value
           // so continue for next column.
@@ -430,6 +430,11 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
     setConstantValue(
         bucketSpec, velox::variant(split_->tableBucketNumber.value()));
   }
+
+  // FIXME resetCachedValues() should not be exposed to developer.
+  //   The cached value should be cleared naturally in ScanSpec's methods
+  //   that are relevant to the value.
+  scanSpec_->resetCachedValues();
 
   // Check filters and see if the whole split can be skipped
   if (!testFilters(
