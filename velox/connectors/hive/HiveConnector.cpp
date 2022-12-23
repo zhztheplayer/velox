@@ -272,18 +272,12 @@ bool testFilters(
           // We are not sure if filter will accept the constant value
           // so continue for next column.
           //
-          // We also remove the filter because it seems like the Parquet
-          // row reader doesn't handle this type of filter too, although
-          // it was already aware of the constant value. This is a workaround
-          // until we fixed TODO-3.
-          //
           // TODO-1 Check if filter accepts the constant value
           // TODO-2 (Probably) Rename the function as "canSkip(...)"
           //        or something to make it clear it's just to pre-filter
           //        before actually reading the data
           // TODO-3 Run filter on the constant value in final row reader
           //        too
-          child->setFilter(nullptr);
           continue;
         }
         // Column is missing. Most likely due to schema evolution.
