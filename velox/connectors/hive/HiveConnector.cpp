@@ -267,6 +267,25 @@ bool testFilters(
     if (child->filter()) {
       const auto& name = child->fieldName();
       if (!rowType->containsChild(name)) {
+        if (child->constantValue() != nullptr) {
+          // Column is missing from reader but set by constant value.
+          // We are not sure if filter will accept the constant value
+          // so continue for next column.
+          //
+          // We also remove the filter because it seems like the Parquet
+          // row reader doesn't handle this type of filter too, although
+          // it was already aware of the constant value. This is a workaround
+          // until we fixed TODO-3.
+          //
+          // TODO-1 Check if filter accepts the constant value
+          // TODO-2 (Probably) Rename the function as "canSkip(...)"
+          //        or something to make it clear it's just to pre-filter
+          //        before actually reading the data
+          // TODO-3 Run filter on the constant value in final row reader
+          //        too
+          child->setFilter(nullptr);
+          continue;
+        }
         // Column is missing. Most likely due to schema evolution.
         if (child->filter()->isDeterministic() &&
             !child->filter()->testNull()) {
@@ -374,14 +393,6 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
     return;
   }
 
-  // Check filters and see if the whole split can be skipped
-  if (!testFilters(scanSpec_.get(), reader_.get(), split_->filePath)) {
-    emptySplit_ = true;
-    ++runtimeStats_.skippedSplits;
-    runtimeStats_.skippedSplitBytes += split_->length;
-    return;
-  }
-
   auto fileType = reader_->rowType();
 
   for (int i = 0; i < readerOutputType_->size(); i++) {
@@ -424,6 +435,17 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
   if (bucketSpec && split_->tableBucketNumber.has_value()) {
     setConstantValue(
         bucketSpec, velox::variant(split_->tableBucketNumber.value()));
+  }
+
+  // Check filters and see if the whole split can be skipped
+  if (!testFilters(
+          scanSpec_.get(),
+          reader_.get(),
+          split_->filePath)) {
+    emptySplit_ = true;
+    ++runtimeStats_.skippedSplits;
+    runtimeStats_.skippedSplitBytes += split_->length;
+    return;
   }
 
   std::vector<std::string> columnNames;
