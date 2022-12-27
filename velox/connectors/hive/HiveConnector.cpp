@@ -431,9 +431,9 @@ void HiveDataSource::addSplit(std::shared_ptr<ConnectorSplit> split) {
         bucketSpec, velox::variant(split_->tableBucketNumber.value()));
   }
 
-  // FIXME resetCachedValues() should not be exposed to developer.
-  //   The cached value should be cleared naturally in ScanSpec's methods
-  //   that are relevant to the value.
+  // FIXME resetCachedValues() is exposed to developer.
+  //   The cached value's better to be cleared naturally in ScanSpec's
+  //   methods that are relevant to the value.
   scanSpec_->resetCachedValues();
 
   // Check filters and see if the whole split can be skipped
