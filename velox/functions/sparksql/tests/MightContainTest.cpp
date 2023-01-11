@@ -73,6 +73,7 @@ TEST_F(MightContainTest, nullBloomFilter) {
   auto value = makeFlatVector<int64_t>({2, 4});
   auto expected = makeNullConstant(TypeKind::BOOLEAN, 2);
   testMightContain(bloomFilter, value, expected);
-}
+};
+
 } // namespace
 } // namespace facebook::velox::functions::sparksql::test

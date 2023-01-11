@@ -171,7 +171,6 @@ void registerFunctions(const std::string& prefix) {
       int64_t,
       Varchar,
       Varchar>({prefix + "unix_timestamp", prefix + "to_unix_timestamp"});
-
   // Register DateTime functions.
   registerFunction<MillisecondFunction, int32_t, Date>(
       {prefix + "millisecond"});
@@ -215,6 +214,8 @@ void registerFunctions(const std::string& prefix) {
   registerFunction<QuarterFunction, int32_t, Timestamp>({prefix + "quarter"});
   registerFunction<QuarterFunction, int32_t, TimestampWithTimezone>(
       {prefix + "quarter"});
+  registerFunction<YearFunction, int32_t, Date>({prefix + "year"});
+  registerFunction<YearFunction, int32_t, Timestamp>({prefix + "year"});
   registerFunction<YearOfWeekFunction, int32_t, Date>(
       {prefix + "year_of_week"});
   registerFunction<YearOfWeekFunction, int32_t, Timestamp>(

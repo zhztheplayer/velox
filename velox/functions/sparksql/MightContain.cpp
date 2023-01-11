@@ -16,6 +16,7 @@
 #include "velox/functions/sparksql/MightContain.h"
 
 #include "velox/common/base/BloomFilter.h"
+
 #include "velox/common/memory/HashStringAllocator.h"
 #include "velox/expression/DecodedArgs.h"
 #include "velox/vector/FlatVector.h"

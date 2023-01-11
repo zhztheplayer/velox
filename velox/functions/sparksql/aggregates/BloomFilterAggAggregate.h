@@ -14,18 +14,12 @@
  * limitations under the License.
  */
 
-#include "velox/functions/sparksql/aggregates/Register.h"
+#pragma once
 
-#include "velox/functions/sparksql/aggregates/BitwiseXorAggregate.h"
-#include "velox/functions/sparksql/aggregates/BloomFilterAggAggregate.h"
+#include <string>
 
 namespace facebook::velox::functions::sparksql::aggregates {
 
-extern void registerFirstLastAggregates(const std::string& prefix);
+bool registerBloomFilterAggAggregate(const std::string& name);
 
-void registerAggregateFunctions(const std::string& prefix) {
-  registerFirstLastAggregates(prefix);
-  aggregates::registerBitwiseXorAggregate(prefix + "bit_xor");
-  aggregates::registerBloomFilterAggAggregate(prefix + "bloom_filter_agg");
-}
 } // namespace facebook::velox::functions::sparksql::aggregates
