@@ -57,4 +57,8 @@ bool HiveConfig::immutablePartitions(const Config* config) {
   return config->get<bool>(kImmutablePartitions, false);
 }
 
+bool HiveConfig::isCaseSensitive(const Config* config) {
+  return config->get<bool>(kCaseSensitive, true);
+}
+
 } // namespace facebook::velox::connector::hive
