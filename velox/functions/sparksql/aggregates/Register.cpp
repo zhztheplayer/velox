@@ -28,5 +28,6 @@ void registerAggregateFunctions(const std::string& prefix) {
   registerFirstLastAggregates(prefix);
   aggregates::registerBitwiseXorAggregate(prefix + "bit_xor");
   aggregates::registerBloomFilterAggAggregate(prefix + "bloom_filter_agg");
+  aggregates::registerDecimalAvgAggregate(prefix + "decimal_avg");
 }
 } // namespace facebook::velox::functions::sparksql::aggregates
