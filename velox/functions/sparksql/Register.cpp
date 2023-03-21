@@ -23,7 +23,6 @@
 #include "velox/functions/prestosql/StringFunctions.h"
 #include "velox/functions/sparksql/ArraySort.h"
 #include "velox/functions/sparksql/Bitwise.h"
-#include "velox/functions/sparksql/CheckOverflow.h"
 #include "velox/functions/sparksql/CompareFunctionsNullSafe.h"
 #include "velox/functions/sparksql/DateTime.h"
 #include "velox/functions/sparksql/DateTimeFunctions.h"
