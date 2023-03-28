@@ -398,7 +398,7 @@ std::vector<MaterializedRow> materialize(
         row.push_back(
             rowVariantAt(dataChunk->GetValue(j, i), rowType->childAt(j)));
       } else if (isDecimalKind(typeKind)) {
-        row.push_back(duckdb::decimalVariant(dataChunk->GetValue(j, i)));
+        row.push_back(decimalVariantAt(dataChunk->GetValue(j, i)));
       } else {
         auto value = VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
             variantAt, typeKind, dataChunk, i, j);
