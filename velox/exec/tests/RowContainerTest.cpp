@@ -690,9 +690,11 @@ TEST_F(RowContainerTest, rowSize) {
   EXPECT_EQ(29, data->nextOffset());
   // 2nd bit in first byte of flags.
   EXPECT_EQ(data->probedFlagOffset(), 8 * 8 + 1);
+  std::unordered_set<char*> rowSet;
   std::vector<char*> rows;
   for (int i = 0; i < kNumRows; ++i) {
     rows.push_back(data->newRow());
+    rowSet.insert(rows.back());
   }
   EXPECT_EQ(kNumRows, data->numRows());
   for (auto i = 0; i < rows.size(); ++i) {
