@@ -50,9 +50,18 @@ void applyCastKernel(
     bool& nullOutput) {
   // Special handling for string target type
   if constexpr (CppToType<To>::typeKind == TypeKind::VARCHAR) {
-    auto output =
-        util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
-            input->valueAt(row), nullOutput);
+    std::string output;
+    if constexpr (
+        CppToType<From>::typeKind == TypeKind::SHORT_DECIMAL ||
+        CppToType<From>::typeKind == TypeKind::LONG_DECIMAL) {
+      output = util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
+          input->valueAt(row), nullOutput, input->type());
+
+    } else {
+      output = util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
+          input->valueAt(row), nullOutput);
+    }
+
     if (!nullOutput) {
       // Write the result output to the output vector
       auto writer = exec::StringWriter<>(result, row);
@@ -63,11 +72,22 @@ void applyCastKernel(
       writer.finalize();
     }
   } else {
-    auto output =
-        util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
-            input->valueAt(row), nullOutput);
-    if (!nullOutput) {
-      result->set(row, output);
+    if constexpr (
+        CppToType<From>::typeKind == TypeKind::SHORT_DECIMAL ||
+        CppToType<From>::typeKind == TypeKind::LONG_DECIMAL) {
+      auto output =
+          util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
+              input->valueAt(row), nullOutput, input->type());
+      if (!nullOutput) {
+        result->set(row, output);
+      }
+    } else {
+      auto output =
+          util::Converter<CppToType<To>::typeKind, void, Truncate>::cast(
+              input->valueAt(row), nullOutput);
+      if (!nullOutput) {
+        result->set(row, output);
+      }
     }
   }
 }
@@ -111,19 +131,43 @@ void applyDecimalCastKernel(
   });
 }
 
-template <typename TInput, typename TOutput>
-void applyIntToDecimalCastKernel(
+template <typename From, typename TOutput>
+void applyBigintToDecimalCastKernel(
     const SelectivityVector& rows,
     const BaseVector& input,
     exec::EvalCtx& context,
     const TypePtr& toType,
     VectorPtr castResult) {
-  auto sourceVector = input.as<SimpleVector<TInput>>();
+  auto sourceVector = input.as<SimpleVector<From>>();
   auto castResultRawBuffer =
       castResult->asUnchecked<FlatVector<TOutput>>()->mutableRawValues();
   const auto& toPrecisionScale = getDecimalPrecisionScale(*toType);
   context.applyToSelectedNoThrow(rows, [&](vector_size_t row) {
     auto rescaledValue = DecimalUtil::rescaleInt<TInput, TOutput>(
+        sourceVector->valueAt(row),
+        toPrecisionScale.first,
+        toPrecisionScale.second);
+    if (rescaledValue.has_value()) {
+      castResultRawBuffer[row] = rescaledValue.value();
+    } else {
+      castResult->setNull(row, true);
+    }
+  });
+}
+
+template <typename TOutput>
+void applyDoubleToDecimalCastKernel(
+    const SelectivityVector& rows,
+    const BaseVector& input,
+    exec::EvalCtx& context,
+    const TypePtr& toType,
+    VectorPtr castResult) {
+  auto sourceVector = input.as<SimpleVector<double>>();
+  auto castResultRawBuffer =
+      castResult->asUnchecked<FlatVector<TOutput>>()->mutableRawValues();
+  const auto& toPrecisionScale = getDecimalPrecisionScale(*toType);
+  context.applyToSelectedNoThrow(rows, [&](vector_size_t row) {
+    auto rescaledValue = DecimalUtil::rescaleDouble<TOutput>(
         sourceVector->valueAt(row),
         toPrecisionScale.first,
         toPrecisionScale.second);
@@ -273,6 +317,15 @@ void CastExpr::applyCast(
       return applyCastWithTry<To, Timestamp>(
           rows, context, input, resultFlatVector);
     }
+    case TypeKind::SHORT_DECIMAL: {
+      return applyCastWithTry<To, UnscaledShortDecimal>(
+          rows, context, input, resultFlatVector);
+    }
+    case TypeKind::LONG_DECIMAL: {
+      return applyCastWithTry<To, UnscaledLongDecimal>(
+          rows, context, input, resultFlatVector);
+    }
+
     default: {
       VELOX_UNSUPPORTED("Invalid from type in casting: {}", fromType);
     }
@@ -529,14 +582,36 @@ VectorPtr CastExpr::applyDecimal(
       applyIntToDecimalCastKernel<int16_t, DecimalType>(
           rows, input, context, toType, castResult);
       break;
-    case TypeKind::INTEGER:
-      applyIntToDecimalCastKernel<int32_t, DecimalType>(
-          rows, input, context, toType, castResult);
+    case TypeKind::INTEGER: {
+      if (toType->kind() == TypeKind::SHORT_DECIMAL) {
+        applyBigintToDecimalCastKernel<int32_t, UnscaledShortDecimal>(
+            rows, input, context, toType, castResult);
+      } else {
+        applyBigintToDecimalCastKernel<int32_t, UnscaledLongDecimal>(
+            rows, input, context, toType, castResult);
+      }
       break;
-    case TypeKind::BIGINT:
-      applyIntToDecimalCastKernel<int64_t, DecimalType>(
-          rows, input, context, toType, castResult);
+    }
+    case TypeKind::BIGINT: {
+      if (toType->kind() == TypeKind::SHORT_DECIMAL) {
+        applyBigintToDecimalCastKernel<int64_t, UnscaledShortDecimal>(
+            rows, input, context, toType, castResult);
+      } else {
+        applyBigintToDecimalCastKernel<int64_t, UnscaledLongDecimal>(
+            rows, input, context, toType, castResult);
+      }
       break;
+    }
+    case TypeKind::DOUBLE: {
+      if (toType->kind() == TypeKind::SHORT_DECIMAL) {
+        applyDoubleToDecimalCastKernel<UnscaledShortDecimal>(
+            rows, input, context, toType, castResult);
+      } else {
+        applyDoubleToDecimalCastKernel<UnscaledLongDecimal>(
+            rows, input, context, toType, castResult);
+      }
+      break;
+    }
     default:
       VELOX_UNSUPPORTED(
           "Cast from {} to {} is not supported",
