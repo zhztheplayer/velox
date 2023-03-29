@@ -47,7 +47,7 @@ class BloomFilterMightContainFunction final : public exec::VectorFunction {
     HashStringAllocator allocator{context.pool()};
     if (serialized->isConstantMapping()) {
       BloomFilter output{StlAllocator<uint64_t>(&allocator)};
-      output.merge(serialized->valueAt<StringView>(0).data());
+      output.merge(serialized->valueAt<StringView>(0).str().c_str());
       rows.applyToSelected([&](int row) {
         auto contain = output.mayContain(
             folly::hasher<int64_t>()(value->valueAt<int64_t>(row)));
@@ -58,7 +58,7 @@ class BloomFilterMightContainFunction final : public exec::VectorFunction {
 
     rows.applyToSelected([&](int row) {
       BloomFilter output{StlAllocator<uint64_t>(&allocator)};
-      output.merge(serialized->valueAt<StringView>(0).data());
+      output.merge(serialized->valueAt<StringView>(0).str().c_str());
       auto contain = output.mayContain(
           folly::hasher<int64_t>()(value->valueAt<int64_t>(row)));
       result.set(row, contain);

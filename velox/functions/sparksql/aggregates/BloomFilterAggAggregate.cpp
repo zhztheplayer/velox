@@ -165,7 +165,8 @@ class BloomFilterAggAggregate : public exec::Aggregate {
         continue;
       }
       if (StringView::isInline(size)) {
-        StringView serialized(size);
+        char buffer[StringView::kInlineSize];
+        StringView serialized = StringView(buffer, size);
         accumulator->serialize(serialized);
         flatResult->setNoCopy(i, serialized);
       } else {
