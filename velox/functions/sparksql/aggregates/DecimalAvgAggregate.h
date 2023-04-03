@@ -355,7 +355,22 @@ class DecimalAverageAggregate : public exec::Aggregate {
         vector->setNull(i, true);
       } else {
         clearNull(rawNulls, i);
-        rawValues[i] = computeFinalValue(accumulator);
+        if (accumulator->overflow > 0) {
+          // Spark does not support ansi mode yet,
+          // and needs to return null when overflow
+          vector->setNull(i, true);
+        } else {
+          try {
+            rawValues[i] = computeFinalValue(accumulator);
+          } catch (const VeloxException& err) {
+            if (err.message().find("overflow") != std::string::npos) {
+              // find overflow in computation
+              vector->setNull(i, true);
+            } else {
+              VELOX_FAIL("compute average failed");
+            }
+          }
+        }
       }
     }
   }
