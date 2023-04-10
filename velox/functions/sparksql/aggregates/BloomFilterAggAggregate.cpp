@@ -197,23 +197,26 @@ class BloomFilterAggAggregate : public exec::Aggregate {
       if (args.size() > 1) {
         DecodedVector decodedEstimatedNumItems(*args[1], rows);
         setConstantArgument(
-            "estimatedNumItems", estimatedNumItems_, decodedEstimatedNumItems);
+            "originalEstimatedNumItems",
+            originalEstimatedNumItems_,
+            decodedEstimatedNumItems);
         if (args.size() > 2) {
           DecodedVector decodedNumBits(*args[2], rows);
-          setConstantArgument("numBits", numBits_, decodedNumBits);
+          setConstantArgument(
+            "originalNumBits", originalNumBits_, decodedNumBits);
         } else {
           VELOX_CHECK_EQ(args.size(), 3);
-          numBits_ = estimatedNumItems_ * 8;
+          originalNumBits_ = originalEstimatedNumItems_ * 8;
         }
       } else {
-        estimatedNumItems_ = DEFAULT_ESPECTED_NUM_ITEMS;
-        numBits_ = estimatedNumItems_ * 8;
+        originalEstimatedNumItems_ = DEFAULT_ESPECTED_NUM_ITEMS;
+        originalNumBits_ = originalEstimatedNumItems_ * 8;
       }
     } else {
       VELOX_USER_FAIL("Function args size must be more than 0")
     }
-    estimatedNumItems_ = std::min(estimatedNumItems_, MAX_NUM_ITEMS);
-    numBits_ = std::min(numBits_, MAX_NUM_BITS);
+    estimatedNumItems_ = std::min(originalEstimatedNumItems_, MAX_NUM_ITEMS);
+    numBits_ = std::min(originalNumBits_, MAX_NUM_BITS);
     capacity_ = numBits_ / 16;
   }
 
@@ -243,6 +246,8 @@ class BloomFilterAggAggregate : public exec::Aggregate {
   // Reusable instance of DecodedVector for decoding input vectors.
   DecodedVector decodedRaw_;
   DecodedVector decodedIntermediate_;
+  int64_t originalEstimatedNumItems_ = kMissingArgument;
+  int64_t originalNumBits_ = kMissingArgument;
   int64_t estimatedNumItems_ = kMissingArgument;
   int64_t numBits_ = kMissingArgument;
   int32_t capacity_ = kMissingArgument;
@@ -254,14 +259,14 @@ bool registerBloomFilterAggAggregate(const std::string& name) {
   std::vector<std::shared_ptr<exec::AggregateFunctionSignature>> signatures{
       exec::AggregateFunctionSignatureBuilder()
           .argumentType("bigint")
-          .argumentType("bigint")
-          .argumentType("bigint")
+          .constantArgumentType("bigint")
+          .constantArgumentType("bigint")
           .intermediateType("varbinary")
           .returnType("varbinary")
           .build(),
       exec::AggregateFunctionSignatureBuilder()
           .argumentType("bigint")
-          .argumentType("bigint")
+          .constantArgumentType("bigint")
           .intermediateType("varbinary")
           .returnType("varbinary")
           .build(),
