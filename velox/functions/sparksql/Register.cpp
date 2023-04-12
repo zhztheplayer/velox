@@ -146,6 +146,9 @@ void registerFunctions(const std::string& prefix) {
   registerFunction<ContainsFunction, bool, Varchar, Varchar>(
       {prefix + "contains"});
 
+  registerFunction<SubstringIndexFunction, Varchar, Varchar, Varchar, int32_t>(
+      {prefix + "substring_index"});
+
   registerFunction<TrimSpaceFunction, Varchar, Varchar>({prefix + "trim"});
   registerFunction<TrimFunction, Varchar, Varchar, Varchar>({prefix + "trim"});
   registerFunction<LTrimSpaceFunction, Varchar, Varchar>({prefix + "ltrim"});
