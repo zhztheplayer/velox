@@ -119,6 +119,14 @@ class StringTest : public SparkFunctionBaseTest {
       const std::optional<std::string>& pattern) {
     return evaluateOnce<bool>("contains(c0, c1)", str, pattern);
   }
+
+  std::optional<std::string> substring_index(
+      const std::optional<std::string>& str,
+      const std::optional<std::string>& delim,
+      int32_t count) {
+    return evaluateOnce<std::string, std::string, std::string, int32_t>(
+        "substring_index(c0, c1, c2)", str, delim, count);
+  }
 };
 
 TEST_F(StringTest, Ascii) {
@@ -282,6 +290,27 @@ TEST_F(StringTest, endsWith) {
   EXPECT_EQ(endsWith("-- hello there!", "hello there"), false);
   EXPECT_EQ(endsWith("-- hello there!", std::nullopt), std::nullopt);
   EXPECT_EQ(endsWith(std::nullopt, "abc"), std::nullopt);
+}
+
+TEST_F(StringTest, substring_index) {
+  // Zero count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 0), "");
+  // Positive count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 1), "Abcd");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 2), "Abcd.ef");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 3), "Abcd.ef.gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "Abcd", 1), "");
+  // Negative count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", -1), "gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", -2), "ef.gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "ef", -1), ".gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "gH", -1), "");
+  // Test for case sensitivity.
+  EXPECT_EQ(substring_index("Ab|AB|ab", "ab", 1), "Ab|AB|");
+  EXPECT_EQ(substring_index("Ab|AB|ab", "ab", 2), "Ab|AB|ab");
+  // Test for string with escape character.
+  EXPECT_EQ(substring_index("Abc\\ABc\\ab", "\\", 1), "Abc");
+  EXPECT_EQ(substring_index("Abc\\ABc\\ab", "\\", 2), "Abc\\ABc");
 }
 
 TEST_F(StringTest, trim) {
