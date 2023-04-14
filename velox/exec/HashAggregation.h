@@ -65,6 +65,7 @@ class HashAggregation : public Operator {
   void maybeIncreasePartialAggregationMemoryUsage(double aggregationPct);
 
   const bool isPartialOutput_;
+  const bool isIntermediate_;
   const bool isDistinct_;
   const bool isGlobal_;
   const std::shared_ptr<memory::MemoryUsageTracker> memoryTracker_;
