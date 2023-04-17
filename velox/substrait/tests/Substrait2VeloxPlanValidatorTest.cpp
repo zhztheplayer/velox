@@ -63,7 +63,7 @@ class Substrait2VeloxPlanConversionTest
 
  private:
   std::shared_ptr<memory::MemoryPool> memoryPool_{
-      memory::getDefaultMemoryPool()};
+      memory::addDefaultLeafMemoryPool()};
 };
 
 TEST_F(Substrait2VeloxPlanConversionTest, group) {

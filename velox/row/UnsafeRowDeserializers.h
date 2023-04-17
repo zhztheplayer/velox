@@ -716,8 +716,8 @@ struct UnsafeRowDeserializer {
       memory::MemoryPool* pool,
       int32_t numFields,
       int32_t fieldsIdx) {
-    auto iterator = std::dynamic_pointer_cast<UnsafeRowPrimitiveBatchIterator>(
-        dataIterator);
+    auto iterator =
+        std::dynamic_pointer_cast<PrimitiveBatchIterator>(dataIterator);
     size_t size = iterator->numRows();
     auto vector = BaseVector::create(type, size, pool);
     using TypeTraits = ScalarTraits<Kind>;
@@ -864,14 +864,14 @@ struct UnsafeRowDeserializer {
     }
   }
 
-  static VectorPtr deserializeComplex(
+  static VectorPtr deserialize(
       std::optional<std::string_view> data,
       TypePtr type,
       memory::MemoryPool* pool,
       int32_t numFields,
       int32_t fieldsIdx) {
     std::vector<std::optional<std::string_view>> vectors{data};
-    return deserializeComplex(vectors, type, pool, numFields, fieldsIdx);
+    return deserialize(vectors, type, pool, numFields, fieldsIdx);
   }
 
   /**

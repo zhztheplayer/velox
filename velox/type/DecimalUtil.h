@@ -89,9 +89,9 @@ class DecimalUtil {
     }
   }
 
-  template <typename TOutput>
+  template <typename TInput, typename TOutput>
   inline static std::optional<TOutput> rescaleDouble(
-      const double inputValue,
+      const TInput inputValue,
       const int toPrecision,
       const int toScale) {
     static_assert(

@@ -504,8 +504,6 @@ bool registerMinMax(const std::string& name) {
             return std::make_unique<TNumeric<Timestamp>>(resultType);
           case TypeKind::DATE:
             return std::make_unique<TNumeric<Date>>(resultType);
-          case TypeKind::INTERVAL_DAY_TIME:
-            return std::make_unique<TNumeric<IntervalDayTime>>(resultType);
           case TypeKind::LONG_DECIMAL:
             return std::make_unique<TNumeric<UnscaledLongDecimal>>(resultType);
           case TypeKind::SHORT_DECIMAL:

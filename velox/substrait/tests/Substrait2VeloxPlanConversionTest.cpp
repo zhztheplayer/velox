@@ -76,7 +76,7 @@ class Substrait2VeloxPlanConversionTest
 
  private:
   std::shared_ptr<memory::MemoryPool> memoryPool_{
-      memory::getDefaultMemoryPool()};
+      memory::addDefaultLeafMemoryPool()};
 };
 
 // This test will firstly generate mock TPC-H lineitem ORC file. Then, Velox's
