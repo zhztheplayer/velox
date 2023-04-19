@@ -504,64 +504,41 @@ core::PlanNodePtr SubstraitVeloxPlanConverter::toVeloxPlan(
 
   const auto& inputType = childNode->outputType();
 
-  std::vector<std::vector<core::FieldAccessTypedExprPtr>> groupingSetExprs;
-  groupingSetExprs.reserve(expandRel.groupings_size());
+  std::vector<std::vector<core::TypedExprPtr>> projectSetExprs;
+  projectSetExprs.reserve(expandRel.fields_size());
+  
+  for (const auto& projections : expandRel.fields()) {
+    std::vector<core::TypedExprPtr> projectExprs;
+    projectExprs.reserve(projections.switching_field().duplicates_size());
 
-  for (const auto& grouping : expandRel.groupings()) {
-    std::vector<core::FieldAccessTypedExprPtr> groupingExprs;
-    groupingExprs.reserve(grouping.groupsets_expressions_size());
-
-    for (const auto& groupingExpr : grouping.groupsets_expressions()) {
-      auto expression =
-          exprConverter_->toVeloxExpr(groupingExpr.selection(), inputType);
-      auto expr_field =
-          dynamic_cast<const core::FieldAccessTypedExpr*>(expression.get());
-      VELOX_CHECK(
-          expr_field != nullptr,
-          " the group set key in Expand Operator only support field")
-
-      groupingExprs.emplace_back(
-          std::dynamic_pointer_cast<const core::FieldAccessTypedExpr>(
-              expression));
-    }
-    groupingSetExprs.emplace_back(groupingExprs);
-  }
-
-  std::vector<core::GroupIdNode::GroupingKeyInfo> groupingKeyInfos;
-  std::set<std::string> names;
-  auto index = 0;
-  for (const auto& groupingSet : groupingSetExprs) {
-    for (const auto& groupingKey : groupingSet) {
-      if (names.find(groupingKey->name()) == names.end()) {
-        core::GroupIdNode::GroupingKeyInfo keyInfos;
-        keyInfos.output = groupingKey->name();
-        keyInfos.input = groupingKey;
-        groupingKeyInfos.push_back(keyInfos);
+    for (
+      const auto& projectExpr : projections.switching_field().duplicates()) {
+      if (projectExpr.has_selection()) {
+        auto expression =
+          exprConverter_->toVeloxExpr(projectExpr.selection(), inputType);
+        projectExprs.emplace_back(expression);
+      } else if (projectExpr.has_literal()) {
+        auto expression =
+          exprConverter_->toVeloxExpr(projectExpr.literal());
+        projectExprs.emplace_back(expression);
+      } else {
+        VELOX_FAIL("The project in Expand Operator only support field or literal.");
       }
-      names.insert(groupingKey->name());
     }
+    projectSetExprs.emplace_back(projectExprs);
   }
 
-  std::vector<std::shared_ptr<const core::FieldAccessTypedExpr>> aggExprs;
-
-  for (const auto& aggExpr : expandRel.aggregate_expressions()) {
-    auto expression = exprConverter_->toVeloxExpr(aggExpr, inputType);
-    auto expr_field =
-        dynamic_cast<const core::FieldAccessTypedExpr*>(expression.get());
-    VELOX_CHECK(
-        expr_field != nullptr,
-        " the agg key in Expand Operator only support field");
-    auto filed =
-        std::dynamic_pointer_cast<const core::FieldAccessTypedExpr>(expression);
-    aggExprs.emplace_back(filed);
+  auto projectSize = expandRel.fields()[0].switching_field().duplicates_size();
+  std::vector<std::string> names;
+  names.reserve(projectSize);
+  for (int idx = 0; idx < projectSize; idx++) {
+    names.push_back(subParser_->makeNodeName(planNodeId_, idx));
   }
 
-  return std::make_shared<core::GroupIdNode>(
+  return std::make_shared<core::ExpandNode>(
       nextPlanNodeId(),
-      groupingSetExprs,
-      std::move(groupingKeyInfos),
-      aggExprs,
-      std::move(expandRel.group_name()),
+      projectSetExprs,
+      std::move(names),
       childNode);
 }
 
