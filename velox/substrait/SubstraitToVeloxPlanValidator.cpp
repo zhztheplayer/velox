@@ -172,61 +172,74 @@ bool SubstraitToVeloxPlanValidator::validate(
   if (expandRel.has_input() && !validate(expandRel.input())) {
     return false;
   }
+  RowTypePtr rowType = nullptr;
   // Get and validate the input types from extension.
-  if (!expandRel.has_advanced_extension()) {
-    std::cout << "Input types are expected in ExpandRel." << std::endl;
-    return false;
-  }
-  const auto& extension = expandRel.advanced_extension();
-  std::vector<TypePtr> types;
-  if (!validateInputTypes(extension, types)) {
-    std::cout << "Validation failed for input types in ExpandRel." << std::endl;
-    return false;
-  }
-
-  int32_t inputPlanNodeId = 0;
-  std::vector<std::string> names;
-  names.reserve(types.size());
-  for (auto colIdx = 0; colIdx < types.size(); colIdx++) {
-    names.emplace_back(subParser_->makeNodeName(inputPlanNodeId, colIdx));
-  }
-  auto rowType = std::make_shared<RowType>(std::move(names), std::move(types));
-
-  // Validate the expand agg expressions.
-  const auto& aggExprs = expandRel.aggregate_expressions();
-  std::vector<std::shared_ptr<const core::ITypedExpr>> expressions;
-  expressions.reserve(aggExprs.size());
-
-  try {
-    for (const auto& expr : aggExprs) {
-      expressions.emplace_back(exprConverter_->toVeloxExpr(expr, rowType));
+  if (expandRel.has_advanced_extension()) {
+    const auto& extension = expandRel.advanced_extension();
+    std::vector<TypePtr> types;
+    if (!validateInputTypes(extension, types)) {
+      std::cout << "Validation failed for input types in ExpandRel."
+                << std::endl;
+      return false;
     }
-    // Try to compile the expressions. If there is any unregistered function or
-    // mismatched type, exception will be thrown.
-    exec::ExprSet exprSet(std::move(expressions), execCtx_);
-  } catch (const VeloxException& err) {
-    std::cout << "Validation failed for agg expression in ExpandRel due to:"
-              << err.message() << std::endl;
-    return false;
+    int32_t inputPlanNodeId = 0;
+    std::vector<std::string> names;
+    names.reserve(types.size());
+    for (auto colIdx = 0; colIdx < types.size(); colIdx++) {
+      names.emplace_back(subParser_->makeNodeName(inputPlanNodeId, colIdx));
+    }
+    rowType = std::make_shared<RowType>(std::move(names), std::move(types));
   }
 
-  // Validate groupings.
-  for (const auto& grouping : expandRel.groupings()) {
-    for (const auto& groupingExpr : grouping.groupsets_expressions()) {
-      const auto& typeCase = groupingExpr.rex_type_case();
-      switch (typeCase) {
-        case ::substrait::Expression::RexTypeCase::kSelection:
-          break;
-        default:
-          std::cout << "Only field is supported in groupings." << std::endl;
-          return false;
+  int32_t projectSize = 0;
+  // Validate fields.
+  for (const auto& fields : expandRel.fields()) {
+    std::vector<core::TypedExprPtr> expressions;
+    if (fields.has_switching_field()) {
+      auto projectExprs = fields.switching_field().duplicates();
+      expressions.reserve(projectExprs.size());
+      if (projectSize == 0) {
+        projectSize = projectExprs.size();
+      } else if (projectSize != projectExprs.size()) {
+        std::cout << "SwitchingField expressions size should be constant."
+                  << std::endl;
+        return false;
       }
+
+      try {
+        for (const auto& projectExpr : projectExprs) {
+          const auto& typeCase = projectExpr.rex_type_case();
+          switch (typeCase) {
+            case ::substrait::Expression::RexTypeCase::kSelection:
+            case ::substrait::Expression::RexTypeCase::kLiteral:
+              break;
+            default:
+              std::cout << "Only field or literal is supported."
+                        << std::endl;
+              return false;
+          }
+          if (rowType) {
+            expressions.emplace_back(
+              exprConverter_->toVeloxExpr(projectExpr, rowType));
+          }
+        }
+
+        if (rowType) {
+          // Try to compile the expressions. If there is any unregistered
+          // function or mismatched type, exception will be thrown.
+          exec::ExprSet exprSet(std::move(expressions), execCtx_);
+        }
+        
+      } catch (const VeloxException& err) {
+        std::cout << "Validation failed for expressions in ExpandRel due to:"
+                  << err.message() << std::endl;
+        return false;
+      }
+    } else {
+      std::cout << "Only SwitchingField is supported in ExpandRel."
+                << std::endl;
+      return false;
     }
-  }
-  // GroupIdNode constructor check
-  if (expandRel.groupings_size() < 2) {
-    LOG(INFO) << "GroupIdNode requires two or more grouping sets.";
-    return false;
   }
 
   return true;
