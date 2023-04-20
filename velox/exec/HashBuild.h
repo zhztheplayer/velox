@@ -280,6 +280,10 @@ class HashBuild final : public Operator {
   uint64_t numSpillRows_{0};
   uint64_t numSpillBytes_{0};
 
+  // The maximum memory usage that a hash build can hold before spilling.
+  // If it is zero, then there is no such limit.
+  const uint64_t spillMemoryThreshold_;
+
   std::unique_ptr<Spiller> spiller_;
 
   // Used to read input from previously spilled data for restoring.
