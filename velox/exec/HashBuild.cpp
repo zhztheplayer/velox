@@ -439,7 +439,6 @@ bool HashBuild::reserveMemory(const RowVectorPtr& input) {
   const auto increment =
       rows->sizeIncrement(input->size(), outOfLineBytes ? flatBytes : 0);
 
-  auto tracker = pool()->getMemoryUsageTracker();
   // There must be at least 2x the increments in reservation.
   if (tracker->availableReservation() > 2 * increment) {
     return true;
