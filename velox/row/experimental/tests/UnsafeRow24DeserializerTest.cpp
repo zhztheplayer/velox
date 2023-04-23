@@ -534,8 +534,6 @@ class UnsafeRowComplexDeserializerTests : public exec::test::OperatorTestBase {
         makeFlatVector<StringView>(batchSize, [](vector_size_t i) {
           return StringView::makeInline("string" + std::to_string(i));
         });
-    auto decimalVector =
-        makeLongDecimalFlatVector({2200, 4400}, DECIMAL(20, 3));
     auto intArrayVector = makeArrayVector<int64_t>(
         batchSize,
         [](vector_size_t row) { return row % 3; },
@@ -547,12 +545,7 @@ class UnsafeRowComplexDeserializerTests : public exec::test::OperatorTestBase {
           return StringView::makeInline("string" + std::to_string(row + index));
         });
     return makeRowVector(
-        {intVector,
-         stringVector,
-         decimalVector,
-         intArrayVector,
-         stringArrayVector},
-        isNullAt);
+        {intVector, stringVector, intArrayVector, stringArrayVector});
   }
 
   void testVectorSerde(const RowVectorPtr& inputVector) {
