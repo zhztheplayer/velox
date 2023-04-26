@@ -142,6 +142,15 @@ class MemoryUsageTracker
   /// zero, the function does nothing.
   void update(int64_t size);
 
+  /// If true, the memory tracker is in high usage and the available memory is
+  /// low. Caller can decide to free some memory (e.g. by spilling out data
+  /// to disk) to help the tracker to leave this state.
+  ///
+  /// The implementation of this method will walk up upon the root tracker
+  /// so when true, it means that the overall available memory for the whole
+  /// tracker tree is low, not only for a single tracker.
+  bool highUsage();
+
   /// Returns the current memory usage.
   int64_t currentBytes() const {
     std::lock_guard<std::mutex> l(mutex_);
