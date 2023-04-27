@@ -95,6 +95,11 @@ class MemoryUsageTracker
   using GrowCallback =
       std::function<bool(int64_t size, MemoryUsageTracker& tracker)>;
 
+  /// Function to determine whether the tracker is at high-usage state.
+  ///
+  /// Should only be set for root tracker.
+  using HighUsageCallBack = std::function<bool(MemoryUsageTracker& tracker)>;
+
   /// This function will be used when a MEM_CAP_EXCEEDED error is thrown during
   /// a call to increment reservation. It returns a string that will be appended
   /// to the error's message and should ideally be used to add additional
@@ -218,6 +223,12 @@ class MemoryUsageTracker
     VELOX_CHECK_NULL(
         parent_, "Only root tracker allows to set memory grow callback");
     growCallback_ = func;
+  }
+
+  void setHighUsageCallback(HighUsageCallBack func) {
+    VELOX_CHECK_NULL(
+        parent_, "Only root tracker allows to set high-usage callback");
+    highUsageCallback_ = func;
   }
 
   void setMakeMemoryCapExceededMessage(MakeMemoryCapExceededMessage func) {
@@ -493,6 +504,8 @@ class MemoryUsageTracker
   int64_t minReservationBytes_{0};
 
   GrowCallback growCallback_{};
+
+  HighUsageCallBack highUsageCallback_{};
 
   MakeMemoryCapExceededMessage makeMemoryCapExceededMessage_{};
 
