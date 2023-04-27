@@ -16,6 +16,7 @@
 #include "velox/exec/LocalPlanner.h"
 #include "velox/core/PlanFragment.h"
 #include "velox/exec/ArrowStream.h"
+#include "velox/exec/ValueStream.h"
 #include "velox/exec/AssignUniqueId.h"
 #include "velox/exec/CallbackSink.h"
 #include "velox/exec/CrossJoinBuild.h"
@@ -184,6 +185,9 @@ uint32_t maxDrivers(const DriverFactory& driverFactory) {
       if (!values->isParallelizable()) {
         return 1;
       }
+    } else if (std::dynamic_pointer_cast<const core::ValueStreamNode>(node)) {
+      // ValueStream node must run single-threaded.
+      return 1;
     } else if (std::dynamic_pointer_cast<const core::ArrowStreamNode>(node)) {
       // ArrowStream node must run single-threaded.
       return 1;
@@ -398,6 +402,11 @@ std::shared_ptr<Driver> DriverFactory::createDriver(
         auto valuesNode =
             std::dynamic_pointer_cast<const core::ValuesNode>(planNode)) {
       operators.push_back(std::make_unique<Values>(id, ctx.get(), valuesNode));
+    } else if (
+        auto valueStreamNode =
+            std::dynamic_pointer_cast<const core::ValueStreamNode>(planNode)) {
+      operators.push_back(
+          std::make_unique<ValueStream>(id, ctx.get(), valueStreamNode));
     } else if (
         auto arrowStreamNode =
             std::dynamic_pointer_cast<const core::ArrowStreamNode>(planNode)) {
