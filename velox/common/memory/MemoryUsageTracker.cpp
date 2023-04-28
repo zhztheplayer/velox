@@ -79,6 +79,18 @@ void MemoryUsageTracker::update(int64_t size) {
   release(-size);
 }
 
+bool MemoryUsageTracker::highUsage() {
+  if (parent_ != nullptr) {
+    return parent_->highUsage();
+  }
+
+  if (highUsageCallback_ != nullptr) {
+    return highUsageCallback_(*this);
+  }
+
+  return false;
+}
+
 void MemoryUsageTracker::reserve(uint64_t size) {
   reservationCheck();
   if (size == 0) {
