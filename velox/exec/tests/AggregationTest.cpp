@@ -724,7 +724,9 @@ TEST_F(AggregationTest, largeValueRangeArray) {
 
   // The partial agg is expected to flush just once. The final agg gets one
   // batch.
-  EXPECT_EQ(1, stats.at(finalAggId).inputVectors);
+  // Change expectation of this case, because we make some change in
+  // https://github.com/oap-project/velox/pull/98.
+  EXPECT_EQ(2, stats.at(finalAggId).inputVectors);
 }
 
 TEST_F(AggregationTest, partialAggregationMemoryLimitIncrease) {
