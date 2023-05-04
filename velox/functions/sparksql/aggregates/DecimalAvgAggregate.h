@@ -25,7 +25,7 @@ namespace facebook::velox::functions::sparksql::aggregates {
 
 using velox::aggregate::LongDecimalWithOverflowState;
 
-template <typename TInputType, typename TIntermediateType, typename TResultType>
+template <typename TInputType, typename TSumResultType, typename TResultType>
 class DecimalAverageAggregate : public exec::Aggregate {
  public:
   explicit DecimalAverageAggregate(TypePtr inputType, TypePtr resultType)
@@ -264,7 +264,7 @@ class DecimalAverageAggregate : public exec::Aggregate {
   void extractAccumulators(char** groups, int32_t numGroups, VectorPtr* result)
       override {
     auto rowVector = (*result)->as<RowVector>();
-    auto sumVector = rowVector->childAt(0)->asFlatVector<TIntermediateType>();
+    auto sumVector = rowVector->childAt(0)->asFlatVector<TSumResultType>();
     auto countVector = rowVector->childAt(1)->asFlatVector<int64_t>();
     rowVector->resize(numGroups);
     sumVector->resize(numGroups);
@@ -273,7 +273,7 @@ class DecimalAverageAggregate : public exec::Aggregate {
     uint64_t* rawNulls = getRawNulls(rowVector);
 
     int64_t* rawCounts = countVector->mutableRawValues();
-    TIntermediateType* rawSums = sumVector->mutableRawValues();
+    TSumResultType* rawSums = sumVector->mutableRawValues();
 
     for (auto i = 0; i < numGroups; ++i) {
       char* group = groups[i];
@@ -283,10 +283,10 @@ class DecimalAverageAggregate : public exec::Aggregate {
         clearNull(rawNulls, i);
         auto* accumulator = decimalAccumulator(group);
         rawCounts[i] = accumulator->count;
-        if constexpr (std::is_same_v<TIntermediateType, UnscaledShortDecimal>) {
-          rawSums[i] = TIntermediateType((int64_t)accumulator->sum);
+        if constexpr (std::is_same_v<TSumResultType, UnscaledShortDecimal>) {
+          rawSums[i] = TSumResultType((int64_t)accumulator->sum);
         } else {
-          rawSums[i] = TIntermediateType(accumulator->sum);
+          rawSums[i] = TSumResultType(accumulator->sum);
         }
       }
     }
