@@ -211,6 +211,76 @@ struct EndsWithFunction {
   }
 };
 
+/// substring_index function
+/// substring_index(string, string, int) -> string
+/// substring_index(str, delim, count) - Returns the substring from str before
+/// count occurrences of the delimiter delim. If count is positive, everything
+/// to the left of the final delimiter (counting from the left) is returned. If
+/// count is negative, everything to the right of the final delimiter (counting
+/// from the right) is returned. The function substring_index performs a
+/// case-sensitive match when searching for delim.
+template <typename T>
+struct SubstringIndexFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
+
+  FOLLY_ALWAYS_INLINE void call(
+      out_type<Varchar>& result,
+      const arg_type<Varchar>& str,
+      const arg_type<Varchar>& delim,
+      const int32_t& count) {
+    if (count == 0) {
+      result.setEmpty();
+      return;
+    }
+    auto strView = std::string_view(str);
+    auto delimView = std::string_view(delim);
+
+    auto strLen = strView.length();
+    auto delimLen = delimView.length();
+    std::size_t index;
+    if (count > 0) {
+      int n = 0;
+      index = 0;
+      while (n++ < count) {
+        index = strView.find(delimView, index);
+        if (index == std::string::npos) {
+          break;
+        }
+        if (n < count) {
+          index++;
+        }
+      }
+    } else {
+      int n = 0;
+      index = strLen - 1;
+      while (n++ < -count) {
+        index = strView.rfind(delimView, index);
+        if (index == std::string::npos) {
+          break;
+        }
+        if (n < -count) {
+          index--;
+        }
+      }
+    }
+
+    // If the specified count of delimiter is not satisfied,
+    // the result is as same as the original string.
+    if (index == std::string::npos) {
+      result.setNoCopy(StringView(strView.data(), strView.size()));
+      return;
+    }
+
+    if (count > 0) {
+      result.setNoCopy(StringView(strView.data(), index));
+    } else {
+      auto resultSize = strView.length() - index - delimLen;
+      result.setNoCopy(
+          StringView(strView.data() + index + delimLen, resultSize));
+    }
+  }
+};
+
 /// ltrim(trimStr, srcStr) -> varchar
 ///     Remove leading specified characters from srcStr. The specified character
 ///     is any character contained in trimStr.
@@ -358,5 +428,96 @@ struct LTrimSpaceFunction : public TrimSpaceFunctionBase<T, true, false> {};
 
 template <typename T>
 struct RTrimSpaceFunction : public TrimSpaceFunctionBase<T, false, true> {};
+
+/// substr(string, start) -> varchar
+///
+///     Returns the rest of string from the starting position start.
+///     Positions start with 1. A negative starting position is interpreted as
+///     being relative to the end of the string. When the starting position is
+///     0, the meaning is to refer to the first character.
+
+///
+/// substr(string, start, length) -> varchar
+///
+///     Returns a substring from string of length length from the
+///     starting position start. Positions start with 1. A negative starting
+///     position is interpreted as being relative to the end of the string.
+///     When the starting position is 0, the meaning is to refer to the
+///     first character.
+template <typename T>
+struct SubstrFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
+
+  // Results refer to strings in the first argument.
+  static constexpr int32_t reuse_strings_from_arg = 0;
+
+  // ASCII input always produces ASCII result.
+  static constexpr bool is_default_ascii_behavior = true;
+
+  FOLLY_ALWAYS_INLINE void call(
+      out_type<Varchar>& result,
+      const arg_type<Varchar>& input,
+      int32_t start,
+      int32_t length = std::numeric_limits<int32_t>::max()) {
+    doCall<false>(result, input, start, length);
+  }
+
+  FOLLY_ALWAYS_INLINE void callAscii(
+      out_type<Varchar>& result,
+      const arg_type<Varchar>& input,
+      int32_t start,
+      int32_t length = std::numeric_limits<int32_t>::max()) {
+    doCall<true>(result, input, start, length);
+  }
+
+  template <bool isAscii>
+  FOLLY_ALWAYS_INLINE void doCall(
+      out_type<Varchar>& result,
+      const arg_type<Varchar>& input,
+      int32_t start,
+      int32_t length = std::numeric_limits<int32_t>::max()) {
+    if (length <= 0) {
+      result.setEmpty();
+      return;
+    }
+    // Following Spark semantics
+    if (start == 0) {
+      start = 1;
+    }
+
+    int32_t numCharacters = stringImpl::length<isAscii>(input);
+
+    // negative starting position
+    if (start < 0) {
+      start = numCharacters + start + 1;
+    }
+
+    // Adjusting last
+    int32_t last;
+    bool lastOverflow = __builtin_add_overflow(start, length - 1, &last);
+    if (lastOverflow || last > numCharacters) {
+      last = numCharacters;
+    }
+
+    // Following Spark semantics
+    if (start <= 0) {
+      start = 1;
+    }
+
+    // Adjusting length
+    length = last - start + 1;
+    if (length <= 0) {
+      result.setEmpty();
+      return;
+    }
+
+    auto byteRange =
+        stringCore::getByteRange<isAscii>(input.data(), start, length);
+
+    // Generating output string
+    result.setNoCopy(StringView(
+        input.data() + byteRange.first, byteRange.second - byteRange.first));
+  }
+};
 
 } // namespace facebook::velox::functions::sparksql

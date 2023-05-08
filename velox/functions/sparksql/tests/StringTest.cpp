@@ -119,6 +119,27 @@ class StringTest : public SparkFunctionBaseTest {
       const std::optional<std::string>& pattern) {
     return evaluateOnce<bool>("contains(c0, c1)", str, pattern);
   }
+
+  std::optional<std::string> substring_index(
+      const std::optional<std::string>& str,
+      const std::optional<std::string>& delim,
+      int32_t count) {
+    return evaluateOnce<std::string, std::string, std::string, int32_t>(
+        "substring_index(c0, c1, c2)", str, delim, count);
+  }
+  std::optional<std::string> substring(
+      std::optional<std::string> str,
+      std::optional<int32_t> start) {
+    return evaluateOnce<std::string>("substring(c0, c1)", str, start);
+  }
+
+  std::optional<std::string> substring(
+      std::optional<std::string> str,
+      std::optional<int32_t> start,
+      std::optional<int32_t> length) {
+    return evaluateOnce<std::string>(
+        "substring(c0, c1, c2)", str, start, length);
+  }
 };
 
 TEST_F(StringTest, Ascii) {
@@ -284,6 +305,27 @@ TEST_F(StringTest, endsWith) {
   EXPECT_EQ(endsWith(std::nullopt, "abc"), std::nullopt);
 }
 
+TEST_F(StringTest, substring_index) {
+  // Zero count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 0), "");
+  // Positive count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 1), "Abcd");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 2), "Abcd.ef");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", 3), "Abcd.ef.gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "Abcd", 1), "");
+  // Negative count.
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", -1), "gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", ".", -2), "ef.gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "ef", -1), ".gH");
+  EXPECT_EQ(substring_index("Abcd.ef.gH", "gH", -1), "");
+  // Test for case sensitivity.
+  EXPECT_EQ(substring_index("Ab|AB|ab", "ab", 1), "Ab|AB|");
+  EXPECT_EQ(substring_index("Ab|AB|ab", "ab", 2), "Ab|AB|ab");
+  // Test for string with escape character.
+  EXPECT_EQ(substring_index("Abc\\ABc\\ab", "\\", 1), "Abc");
+  EXPECT_EQ(substring_index("Abc\\ABc\\ab", "\\", 2), "Abc\\ABc");
+}
+
 TEST_F(StringTest, trim) {
   EXPECT_EQ(trim(""), "");
   EXPECT_EQ(trim("  data\t "), "data\t");
@@ -367,6 +409,41 @@ TEST_F(StringTest, rtrim) {
   EXPECT_EQ(
       rtrim("\u6570", "\u6574\u6570 \u6570\u636E!"),
       "\u6574\u6570 \u6570\u636E!");
+}
+
+TEST_F(StringTest, substring) {
+  EXPECT_EQ(substring("example", 0, 2), "ex");
+  EXPECT_EQ(substring("example", 1, -1), "");
+  EXPECT_EQ(substring("example", 1, 0), "");
+  EXPECT_EQ(substring("example", 1, 2), "ex");
+  EXPECT_EQ(substring("example", 1, 7), "example");
+  EXPECT_EQ(substring("example", 1, 100), "example");
+  EXPECT_EQ(substring("example", 2, 2), "xa");
+  EXPECT_EQ(substring("example", 8, 2), "");
+  EXPECT_EQ(substring("example", -2, 2), "le");
+  EXPECT_EQ(substring("example", -7, 2), "ex");
+  EXPECT_EQ(substring("example", -8, 2), "e");
+  EXPECT_EQ(substring("example", -9, 2), "");
+  EXPECT_EQ(substring("example", -7, 7), "example");
+  EXPECT_EQ(substring("example", -9, 9), "example");
+  EXPECT_EQ(substring("example", 4, 2147483645), "mple");
+  EXPECT_EQ(substring("example", 2147483645, 4), "");
+  EXPECT_EQ(substring("example", -2147483648, 1), "");
+  EXPECT_EQ(substring("da\u6570\u636Eta", 2, 4), "a\u6570\u636Et");
+  EXPECT_EQ(substring("da\u6570\u636Eta", -3, 2), "\u636Et");
+
+  EXPECT_EQ(substring("example", 0), "example");
+  EXPECT_EQ(substring("example", 1), "example");
+  EXPECT_EQ(substring("example", 2), "xample");
+  EXPECT_EQ(substring("example", 8), "");
+  EXPECT_EQ(substring("example", 2147483647), "");
+  EXPECT_EQ(substring("example", -2), "le");
+  EXPECT_EQ(substring("example", -7), "example");
+  EXPECT_EQ(substring("example", -8), "example");
+  EXPECT_EQ(substring("example", -9), "example");
+  EXPECT_EQ(substring("example", -2147483647), "example");
+  EXPECT_EQ(substring("da\u6570\u636Eta", 3), "\u6570\u636Eta");
+  EXPECT_EQ(substring("da\u6570\u636Eta", -3), "\u636Eta");
 }
 
 } // namespace

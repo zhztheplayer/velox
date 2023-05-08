@@ -520,7 +520,8 @@ bool registerMinMax(const std::string& name) {
                 name,
                 inputType->kindName());
         }
-      });
+      },
+      true);
 }
 
 } // namespace
