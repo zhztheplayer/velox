@@ -14,6 +14,7 @@
 add_library(
   velox_exec
   Aggregate.cpp
+  AggregateFunctionAdapter.cpp
   AggregateFunctionRegistry.cpp
   AggregationMasks.cpp
   AggregateWindow.cpp
@@ -24,6 +25,7 @@ add_library(
   Driver.cpp
   EnforceSingleRow.cpp
   Exchange.cpp
+  Expand.cpp
   FilterProject.cpp
   GroupId.cpp
   GroupingSet.cpp
@@ -57,6 +59,7 @@ add_library(
   TopN.cpp
   Unnest.cpp
   Values.cpp
+  ValueStream.cpp
   VectorHasher.cpp
   Window.cpp
   WindowFunction.cpp
