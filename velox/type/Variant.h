@@ -223,7 +223,10 @@ class variant {
     if constexpr (
         std::is_same_v<T, float> || std::is_same_v<T, double> ||
         std::is_same_v<T, long double>) {
-      return (std::signbit(av) == std::signbit(bv)) && (av == bv);
+      // It's rare that the expression produces (true && false)
+      // comparing to (false && ?). Put (av == bv) on the lhs to
+      // let it fail-fast
+      return ((av == bv) && (std::signbit(av) == std::signbit(bv)));
     }
     // todo(youknowjack): centralize equality semantics
     return av == bv;
