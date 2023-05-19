@@ -216,8 +216,17 @@ class variant {
     if (a.isNull() || b.isNull()) {
       return false;
     }
+    const auto& av = a.value<KIND>();
+    const auto& bv = b.value<KIND>();
+
+    using T = typename detail::VariantTypeTraits<KIND>::stored_type;
+    if constexpr (
+        std::is_same_v<T, float> || std::is_same_v<T, double> ||
+        std::is_same_v<T, long double>) {
+      return (std::signbit(av) == std::signbit(bv)) && (av == bv);
+    }
     // todo(youknowjack): centralize equality semantics
-    return a.value<KIND>() == b.value<KIND>();
+    return av == bv;
   }
 
   template <TypeKind KIND>
