@@ -18,6 +18,7 @@
 #include "velox/functions/lib/IsNull.h"
 #include "velox/functions/lib/Re2Functions.h"
 #include "velox/functions/lib/RegistrationHelpers.h"
+#include "velox/functions/prestosql/Arithmetic.h"
 #include "velox/functions/prestosql/JsonFunctions.h"
 #include "velox/functions/prestosql/Rand.h"
 #include "velox/functions/prestosql/StringFunctions.h"
@@ -249,6 +250,8 @@ void registerFunctions(const std::string& prefix) {
   registerFunction<DateDiffFunction, int32_t, Date, Date>({"date_diff"});
   registerFunction<UnscaledValueFunction, int64_t, UnscaledShortDecimal>(
       {prefix + "unscaled_value"});
+  registerFunction<Log2FunctionNaNAsNull, double, double>({prefix + "log2"});
+  registerFunction<Log10FunctionNaNAsNull, double, double>({prefix + "log10"});
 }
 
 } // namespace sparksql
