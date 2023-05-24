@@ -174,6 +174,7 @@ struct Log2FunctionNaNAsNull {
     }
     result = std::log2(a);
     return true;
+  }
 };
 
 template <typename T>
@@ -185,6 +186,7 @@ struct Log10FunctionNaNAsNull {
     }
     result = std::log10(a);
     return true;
+  }
 };
 
 template <typename T>
