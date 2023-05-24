@@ -146,14 +146,7 @@ bool SubstraitToVeloxPlanValidator::validateScalarFunction(
       return false;
     }
   }
-  if (name == "murmur3hash") {
-    for (const auto& type : types) {
-      if (type == "ts") {
-        VLOG(1) << "Timestamp type is not supported in " << name << ".";
-        return false;
-      }
-    }
-  }
+
   std::unordered_set<std::string> functions = {
       "regexp_replace",    "split",         "split_part",
       "factorial",         "concat_ws",     "rand",
@@ -988,7 +981,8 @@ bool SubstraitToVeloxPlanValidator::validate(
       "covar_pop",
       "covar_pop_merge",
       "covar_samp",
-      "covar_samp_merge"};
+      "covar_samp_merge",
+      "approx_distinct"};
   for (const auto& funcSpec : funcSpecs) {
     auto funcName = subParser_->getSubFunctionName(funcSpec);
     if (supportedFuncs.find(funcName) == supportedFuncs.end()) {
