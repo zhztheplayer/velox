@@ -253,6 +253,8 @@ void registerFunctions(const std::string& prefix) {
 
   registerFunction<Atan2FunctionIgnoreZeroSign, double, double, double>(
       {prefix + "atan2"});
+  registerFunction<Log2FunctionNaNAsNull, double, double>({prefix + "log2"});
+  registerFunction<Log10FunctionNaNAsNull, double, double>({prefix + "log10"});
 }
 
 } // namespace sparksql
