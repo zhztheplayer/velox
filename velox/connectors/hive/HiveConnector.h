@@ -49,6 +49,7 @@ class HiveConnector : public Connector {
         connectorQueryCtx->expressionEvaluator(),
         connectorQueryCtx->allocator(),
         connectorQueryCtx->scanId(),
+        HiveConfig::isCaseSensitive(connectorQueryCtx->config()),
         executor_);
   }
 
