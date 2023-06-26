@@ -174,8 +174,11 @@ void Writer::newRowGroup(int32_t numRows) {
 }
 
 void Writer::close() {
-  flush();
-  finalSink_->close();
+  if (arrowWriter_) {
+    PARQUET_THROW_NOT_OK(arrowWriter_->Close());
+    arrowWriter_.reset();
+  }
+  PARQUET_THROW_NOT_OK(stream_->Close());
 }
 
 parquet::WriterOptions getParquetOptions(
