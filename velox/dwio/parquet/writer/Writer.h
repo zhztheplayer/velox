@@ -81,6 +81,11 @@ class Writer : public dwio::common::Writer {
   std::shared_ptr<memory::MemoryPool> pool_;
   std::shared_ptr<memory::MemoryPool> generalPool_;
 
+  std::shared_ptr<arrow::Schema> schema_;
+
+  // columns, Arrays
+  std::vector<std::vector<std::shared_ptr<arrow::Array>>> stagingChunks_;
+
   // Final destination of output.
   std::unique_ptr<dwio::common::DataSink> finalSink_;
 
