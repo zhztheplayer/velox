@@ -341,6 +341,7 @@ HiveDataSource::HiveDataSource(
     }
     readerOutputType_ = ROW(std::move(names), std::move(types));
   }
+  rowReaderOpts_.setOutputType(readerOutputType_);
   readerOpts_.setCaseSensitive(caseSensitive);
   rowReaderOpts_.setScanSpec(scanSpec_);
   rowReaderOpts_.setMetadataFilter(metadataFilter_);
@@ -727,7 +728,10 @@ void HiveDataSource::configureRowReaderOptions(
     cs = std::make_shared<dwio::common::ColumnSelector>(kEmpty);
   } else {
     cs = std::make_shared<dwio::common::ColumnSelector>(
-        reader_->rowType(), columnNames);
+        reader_->rowType(),
+        columnNames,
+        nullptr,
+        readerOpts_.isCaseSensitive());
   }
   options.select(cs).range(split_->start, split_->length);
 }
