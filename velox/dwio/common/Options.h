@@ -111,6 +111,7 @@ class RowReaderOptions {
   std::function<void(
       facebook::velox::dwio::common::flatmap::FlatMapKeySelectionStats)>
       keySelectionCallback_;
+  RowTypePtr outputType_;
 
  public:
   RowReaderOptions() noexcept
@@ -280,6 +281,14 @@ class RowReaderOptions {
    */
   void setAppendRowNumberColumn(bool value) {
     appendRowNumberColumn_ = value;
+  }
+
+  void setOutputType(const RowTypePtr& outputType) {
+    outputType_ = outputType;
+  }
+
+  const RowTypePtr& getOutputType() const {
+    return outputType_;
   }
 
   bool getAppendRowNumberColumn() const {
