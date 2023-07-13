@@ -112,6 +112,10 @@ class IMemoryManager {
       const std::string& name = "",
       bool threadSafe = true) = 0;
 
+  /// Invoked to shrink a memory pool's free capacity with up to
+  /// 'decrementBytes'.
+  virtual uint64_t shrinkPool(MemoryPool* pool, uint64_t decrementBytes) = 0;
+
   /// Invoked to grows a memory pool's free capacity with at least
   /// 'incrementBytes'. The function returns true on success, otherwise false.
   virtual bool growPool(MemoryPool* pool, uint64_t incrementBytes) = 0;
@@ -190,6 +194,7 @@ class MemoryManager final : public IMemoryManager {
       const std::string& name = "",
       bool threadSafe = true) final;
 
+  uint64_t shrinkPool(MemoryPool* pool, uint64_t decrementBytes) final;
   bool growPool(MemoryPool* pool, uint64_t incrementBytes) final;
 
   MemoryPool& deprecatedSharedLeafPool() final;
