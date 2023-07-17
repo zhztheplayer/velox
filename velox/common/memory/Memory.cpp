@@ -111,19 +111,22 @@ std::shared_ptr<MemoryPool> MemoryManager::addRootPool(
   options.trackUsage = true;
   options.checkUsageLeak = checkUsageLeak_;
 
-  folly::SharedMutex::WriteHolder guard{mutex_};
-  if (pools_.find(poolName) != pools_.end()) {
-    VELOX_FAIL("Duplicate root pool name found: {}", poolName);
+  std::shared_ptr<MemoryPool> pool;
+  {
+    folly::SharedMutex::WriteHolder guard{mutex_};
+    if (pools_.find(poolName) != pools_.end()) {
+      VELOX_FAIL("Duplicate root pool name found: {}", poolName);
+    }
+    pool = std::make_shared<MemoryPoolImpl>(
+        this,
+        poolName,
+        MemoryPool::Kind::kAggregate,
+        nullptr,
+        std::move(reclaimer),
+        poolDestructionCb_,
+        options);
+    pools_.emplace(poolName, pool);
   }
-  auto pool = std::make_shared<MemoryPoolImpl>(
-      this,
-      poolName,
-      MemoryPool::Kind::kAggregate,
-      nullptr,
-      std::move(reclaimer),
-      poolDestructionCb_,
-      options);
-  pools_.emplace(poolName, pool);
   VELOX_CHECK_EQ(pool->capacity(), 0);
   if (arbitrator_ != nullptr) {
     arbitrator_->reserveMemory(pool.get(), capacity);
@@ -168,12 +171,14 @@ bool MemoryManager::growPool(MemoryPool* pool, uint64_t incrementBytes) {
 
 void MemoryManager::dropPool(MemoryPool* pool) {
   VELOX_CHECK_NOT_NULL(pool);
-  folly::SharedMutex::WriteHolder guard{mutex_};
-  auto it = pools_.find(pool->name());
-  if (it == pools_.end()) {
-    VELOX_FAIL("The dropped memory pool {} not found", pool->name());
+  {
+    folly::SharedMutex::WriteHolder guard{mutex_};
+    auto it = pools_.find(pool->name());
+    if (it == pools_.end()) {
+      VELOX_FAIL("The dropped memory pool {} not found", pool->name());
+    }
+    pools_.erase(it);
   }
-  pools_.erase(it);
   if (arbitrator_ != nullptr) {
     arbitrator_->releaseMemory(pool, 0);
   }
