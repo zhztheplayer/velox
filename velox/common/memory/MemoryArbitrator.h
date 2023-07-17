@@ -127,6 +127,7 @@ class MemoryArbitrator {
       const std::vector<std::shared_ptr<MemoryPool>>& candidatePools,
       uint64_t targetBytes) = 0;
 
+  uint64_t capacity();
   /// The internal execution stats of the memory arbitrator.
   struct Stats {
     /// The number of arbitration requests.

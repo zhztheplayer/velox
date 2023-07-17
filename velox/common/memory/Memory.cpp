@@ -28,15 +28,7 @@ constexpr folly::StringPiece kDefaultLeafName("__default_leaf__");
 MemoryManager::MemoryManager(const Options& options)
     : capacity_{options.capacity},
       allocator_{options.allocator->shared_from_this()},
-      arbitrator_(MemoryArbitrator::create(MemoryArbitrator::Config{
-          .kind = options.arbitratorConfig.kind,
-          .capacity = capacity_,
-          .initMemoryPoolCapacity =
-              options.arbitratorConfig.initMemoryPoolCapacity,
-          .minMemoryPoolCapacityTransferSize =
-              options.arbitratorConfig.minMemoryPoolCapacityTransferSize,
-          .retryArbitrationFailure =
-              options.arbitratorConfig.retryArbitrationFailure})),
+      arbitrator_{options.arbitratorFactory()},
       alignment_(std::max(MemoryAllocator::kMinAlignment, options.alignment)),
       checkUsageLeak_(options.checkUsageLeak),
       poolDestructionCb_([&](MemoryPool* pool) { dropPool(pool); }),
@@ -57,6 +49,9 @@ MemoryManager::MemoryManager(const Options& options)
               .checkUsageLeak = options.checkUsageLeak})} {
   VELOX_CHECK_NOT_NULL(allocator_);
   VELOX_USER_CHECK_GE(capacity_, 0);
+  if (arbitrator_ != nullptr) {
+    VELOX_CHECK_EQ(arbitrator_->capacity(), capacity_);
+  }
   MemoryAllocator::alignmentCheck(0, alignment_);
   defaultRoot_->grow(defaultRoot_->maxCapacity());
   const size_t numSharedPools =
@@ -154,7 +149,7 @@ std::shared_ptr<MemoryPool> MemoryManager::addLeafPool(
 uint64_t MemoryManager::shrinkPool(MemoryPool* pool, uint64_t decrementBytes) {
   VELOX_CHECK_NOT_NULL(pool);
   if (arbitrator_ == nullptr) {
-    return 0;
+    return pool->shrink(decrementBytes);
   }
   return arbitrator_->releaseMemory(pool, decrementBytes);
 }

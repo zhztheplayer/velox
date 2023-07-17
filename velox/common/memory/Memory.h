@@ -80,8 +80,9 @@ class IMemoryManager {
     /// Specifies the backing memory allocator.
     MemoryAllocator* allocator{MemoryAllocator::getInstance()};
 
-    /// Specifies the memory arbitration config.
-    MemoryArbitrator::Config arbitratorConfig{};
+    /// Specifies the memory arbitrator
+    std::function<std::unique_ptr<MemoryArbitrator>()> arbitratorFactory{
+        []() { return MemoryArbitrator::create({}); }};
   };
 
   virtual ~IMemoryManager() = default;
