@@ -438,8 +438,7 @@ bool HashBuild::reserveMemory(const RowVectorPtr& input) {
   }
 
   const auto currentUsage = pool()->currentBytes();
-  if ((spillMemoryThreshold_ != 0 && currentUsage > spillMemoryThreshold_) ||
-      pool()->highUsage()) {
+  if (spillMemoryThreshold_ != 0 && currentUsage > spillMemoryThreshold_) {
     const int64_t bytesToSpill =
         currentUsage * spillConfig()->spillableReservationGrowthPct / 100;
     numSpillRows_ = std::max<int64_t>(
