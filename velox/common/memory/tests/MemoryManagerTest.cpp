@@ -74,7 +74,7 @@ TEST(MemoryManagerTest, Ctor) {
     arbitratorConfig.kind = MemoryArbitrator::Kind::kShared;
     // The arbitrator capacity will be overridden by the memory manager's
     // capacity.
-    arbitratorConfig.capacity = folly::Random::rand32();
+    arbitratorConfig.capacity = options.capacity;
     options.arbitratorFactory = [&]() {
       return MemoryArbitrator::create(arbitratorConfig);
     };
