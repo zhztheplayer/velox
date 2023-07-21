@@ -759,6 +759,8 @@ bool HashBuild::finishHashBuild() {
       }
     }
 
+    SpillPartitionSet nonEmptySpillPartitions;
+
     if (joinHasNullKeys_ && isAntiJoin(joinType_) && nullAware_ &&
         !joinNode_->filter()) {
       joinBridge_->setAntiJoinHasNullKeys();
@@ -776,17 +778,21 @@ bool HashBuild::finishHashBuild() {
 
         finishSpill(spillPartitions);
 
-        // Verify all the spilled partitions are not empty as we won't spill on
+        // Select the spilled partitions that are not empty as we won't spill on
         // an empty one.
-        for (const auto& spillPartitionEntry : spillPartitions) {
-          VELOX_CHECK_GT(spillPartitionEntry.second->numFiles(), 0);
+        for (auto& spillPartitionEntry : spillPartitions) {
+          if (FOLLY_UNLIKELY(spillPartitionEntry.second->numFiles() == 0)) {
+            continue;
+          }
+          nonEmptySpillPartitions.emplace(
+              spillPartitionEntry.first, std::move(spillPartitionEntry.second));
         }
       }
 
       // TODO: re-enable parallel join build with spilling triggered after
       // https://github.com/facebookincubator/velox/issues/3567 is fixed.
       const bool allowPrallelJoinBuild =
-          !otherTables.empty() && spillPartitions.empty();
+          !otherTables.empty() && nonEmptySpillPartitions.empty();
       table_->prepareJoinTable(
           std::move(otherTables),
           allowPrallelJoinBuild ? operatorCtx_->task()->queryCtx()->executor()
@@ -795,7 +801,7 @@ bool HashBuild::finishHashBuild() {
       addRuntimeStats();
       if (joinBridge_->setHashTable(
               std::move(table_),
-              std::move(spillPartitions),
+              std::move(nonEmptySpillPartitions),
               joinHasNullKeys_)) {
         spillGroup_->restart();
       }
