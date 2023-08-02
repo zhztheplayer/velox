@@ -23,6 +23,7 @@
 #include "velox/common/memory/MallocAllocator.h"
 #include "velox/common/memory/Memory.h"
 #include "velox/common/memory/MmapAllocator.h"
+#include "velox/common/memory/SharedArbitrator.h"
 #include "velox/common/testutil/TestValue.h"
 
 DECLARE_bool(velox_memory_leak_check_enabled);
@@ -72,6 +73,7 @@ class MemoryPoolTest : public testing::TestWithParam<TestParam> {
 
  protected:
   static void SetUpTestCase() {
+    SharedArbitrator::registerFactory();
     FLAGS_velox_memory_leak_check_enabled = true;
     TestValue::enable();
   }
@@ -3125,7 +3127,7 @@ TEST_P(MemoryPoolTest, maybeReserveFailWithAbort) {
   constexpr int64_t kMB = 1 << 20;
   MemoryManagerOptions options;
   options.capacity = kMaxMemory;
-  options.arbitratorKind = MemoryArbitrator::Kind::kShared;
+  options.arbitratorKind = "SHARED";
   MemoryManager manager{options};
   auto root = manager.addRootPool(
       "maybeReserveFailWithAbort", kMaxSize, MemoryReclaimer::create());

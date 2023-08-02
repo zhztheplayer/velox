@@ -17,6 +17,7 @@
 #include "velox/exec/tests/utils/OperatorTestBase.h"
 #include "velox/common/caching/AsyncDataCache.h"
 #include "velox/common/file/FileSystems.h"
+#include "velox/common/memory/SharedArbitrator.h"
 #include "velox/common/testutil/TestValue.h"
 #include "velox/dwio/common/DataSink.h"
 #include "velox/exec/Exchange.h"
@@ -57,6 +58,9 @@ void OperatorTestBase::TearDownTestCase() {
 }
 
 void OperatorTestBase::SetUp() {
+  if (!memory::SharedArbitrator::isFactoryRegistered()) {
+    memory::SharedArbitrator::registerFactory();
+  }
   if (!isRegisteredVectorSerde()) {
     this->registerVectorSerde();
   }
