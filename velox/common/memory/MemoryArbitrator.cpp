@@ -26,8 +26,6 @@ std::string MemoryArbitrator::kindString(Kind kind) {
       return "NOOP";
     case Kind::kShared:
       return "SHARED";
-    case Kind::kCustom:
-      return "CUSTOM";
     default:
       return fmt::format("UNKNOWN: {}", static_cast<int>(kind));
   }
@@ -47,11 +45,6 @@ std::unique_ptr<MemoryArbitrator> MemoryArbitrator::create(
       return nullptr;
     case Kind::kShared:
       return std::make_unique<SharedArbitrator>(config);
-    case Kind::kCustom:
-      VELOX_USER_FAIL(
-          "{} kind of Arbitrator can't be created via {}",
-          kindString(config.kind),
-          __FUNCTION__)
     default:
       VELOX_UNREACHABLE(kindString(config.kind));
   }

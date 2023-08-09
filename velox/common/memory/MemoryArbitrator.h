@@ -60,11 +60,6 @@ class MemoryArbitrator {
     /// reclaim from a running query through techniques such as disk-spilling,
     /// partial aggregation or persistent shuffle data flushes.
     kShared,
-    // The customized memory arbitrator which is created through user provided
-    // factory method for some specialized use cases. For example in Intel's
-    // Gluten project, arbitrator is implemented to reserve memory from
-    // Apache Spark's memory manager.
-    kCustom
   };
 
   struct Config {
@@ -97,10 +92,6 @@ class MemoryArbitrator {
     return kind_;
   }
   static std::string kindString(Kind kind);
-
-  uint64_t capacity() const {
-    return capacity_;
-  }
 
   virtual ~MemoryArbitrator() = default;
 
