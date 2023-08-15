@@ -741,7 +741,7 @@ uint64_t Writer::MemoryReclaimer::reclaim(
     return 0;
   }
   writer_->flush();
-  return pool->shrink(targetBytes);
+  return pool->shrinkManaged(pool, targetBytes);
 }
 
 dwrf::WriterOptions getDwrfOptions(const dwio::common::WriterOptions& options) {
