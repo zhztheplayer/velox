@@ -78,6 +78,10 @@ struct MemoryManagerOptions {
   /// capacity for system usage.
   int64_t queryMemoryCapacity{kMaxMemory};
 
+  /// Specifies the growth quantum of memory pool reservation while
+  /// maybeReserve() is called
+  int32_t memoryPoolGrowthQuantum{kDefaultGrowthQuantum};
+
   /// If true, enable memory usage tracking in the default memory pool.
   bool trackDefaultUsage{
       FLAGS_velox_enable_memory_usage_track_in_default_memory_pool};
@@ -215,6 +219,7 @@ class MemoryManager {
   // within capacity limit. Memory arbitrator ensures that total allocated
   // memory pool capacity is within the limit.
   const int64_t capacity_;
+  const int32_t memoryPoolGrowthQuantum_;
   const std::shared_ptr<MemoryAllocator> allocator_;
   // If not null, used to arbitrate the memory capacity among 'pools_'.
   const std::unique_ptr<MemoryArbitrator> arbitrator_;

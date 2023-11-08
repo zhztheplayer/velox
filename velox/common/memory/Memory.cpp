@@ -26,6 +26,7 @@ constexpr folly::StringPiece kDefaultLeafName("__default_leaf__");
 
 MemoryManager::MemoryManager(const MemoryManagerOptions& options)
     : capacity_{options.capacity},
+      memoryPoolGrowthQuantum_{options.memoryPoolGrowthQuantum},
       allocator_{options.allocator->shared_from_this()},
       // TODO: consider to reserve a small amount of memory to compensate for
       //  the unreclaimable cache memory which are pinned by query accesses if
@@ -52,6 +53,7 @@ MemoryManager::MemoryManager(const MemoryManagerOptions& options)
           MemoryPool::Options{
               .alignment = alignment_,
               .maxCapacity = kMaxMemory,
+              .growthQuantum = options.memoryPoolGrowthQuantum,
               .trackUsage = options.trackDefaultUsage,
               .checkUsageLeak = options.checkUsageLeak,
               .debugEnabled = options.debugEnabled})} {
@@ -113,6 +115,7 @@ std::shared_ptr<MemoryPool> MemoryManager::addRootPool(
   MemoryPool::Options options;
   options.alignment = alignment_;
   options.maxCapacity = capacity;
+  options.growthQuantum = memoryPoolGrowthQuantum_;
   options.trackUsage = true;
   options.checkUsageLeak = checkUsageLeak_;
   options.debugEnabled = debugEnabled_;

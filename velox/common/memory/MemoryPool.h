@@ -56,6 +56,8 @@ class MemoryManager;
 
 constexpr int64_t kMaxMemory = std::numeric_limits<int64_t>::max();
 
+constexpr int32_t kDefaultGrowthQuantum = 8 << 20;
+
 /// Sets the memory reclaimer to the provided memory pool.
 using SetMemoryReclaimer = std::function<void(MemoryPool*)>;
 
@@ -126,6 +128,10 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
     uint16_t alignment{MemoryAllocator::kMaxAlignment};
     /// Specifies the max memory capacity of this memory pool.
     int64_t maxCapacity{kMaxMemory};
+
+    /// Specifies the growth quantum of the memory pool reservation while
+    /// maybeReserve() is called
+    int32_t growthQuantum{kDefaultGrowthQuantum};
 
     /// If true, tracks the memory usage from the leaf memory pool and aggregate
     /// up to the root memory pool for capacity enforcement. Otherwise there is
@@ -520,6 +526,7 @@ class MemoryPool : public std::enable_shared_from_this<MemoryPool> {
   const uint16_t alignment_;
   const std::shared_ptr<MemoryPool> parent_;
   const int64_t maxCapacity_;
+  const int32_t growthQuantum_;
   const bool trackUsage_;
   const bool threadSafe_;
   const bool checkUsageLeak_;

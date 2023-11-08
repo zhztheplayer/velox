@@ -792,6 +792,53 @@ void GroupingSet::resetTable() {
   }
 }
 
+bool GroupingSet::isFitting(const RowVectorPtr& input) {
+  auto* rows = table_->rows();
+  auto [freeRows, outOfLineFreeBytes] = rows->freeSpace();
+
+  const auto outOfLineBytes =
+      rows->stringAllocator().retainedSize() - outOfLineFreeBytes;
+  const int64_t flatBytes = input->estimateFlatSize();
+
+  const auto availableReservationBytes = pool_.availableReservation();
+  const auto tableIncrementBytes = table_->hashTableSizeIncrease(input->size());
+  const auto incrementBytes =
+      rows->sizeIncrement(input->size(), outOfLineBytes ? flatBytes * 2 : 0) +
+      tableIncrementBytes;
+
+  if ((tableIncrementBytes == 0) && (freeRows > input->size()) &&
+      (outOfLineBytes == 0 || outOfLineFreeBytes >= flatBytes * 2)) {
+    // Enough free rows for input rows and enough variable length free space
+    // for double the flat size of the whole vector. If outOfLineBytes is 0
+    // there is no need for variable length space. Double the flat size is a
+    // stopgap because the real increase can be higher, specially with
+    // aggregates that have stl or folly containers. Make a way to raise the
+    // reservation in the spill protected section instead.
+    return true;
+  }
+
+  // If there is variable length data we take double the flat size of the
+  // input as a cap on the new variable length data needed. Same condition as
+  // in first check. Completely arbitrary. Allow growth in spill protected
+  // area instead.
+  // There must be at least 2x the increment in reservation.
+  if (availableReservationBytes > 2 * incrementBytes) {
+    return true;
+  }
+
+  // Check if we can increase reservation. The increment is the larger of twice
+  // the maximum increment from this input and 'spillableReservationGrowthPct_'
+  // of the current memory usage.
+  const auto targetIncrementBytes = incrementBytes * 2;
+  {
+    ReclaimableSectionGuard guard(nonReclaimableSection_);
+    if (pool_.maybeReserve(targetIncrementBytes)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool GroupingSet::isPartialFull(int64_t maxBytes) {
   VELOX_CHECK(isPartial_);
   if (!table_ || allocatedBytes() <= maxBytes) {
@@ -811,6 +858,17 @@ bool GroupingSet::isPartialFull(int64_t maxBytes) {
     table_->decideHashMode(0, true);
   }
   return allocatedBytes() > maxBytes;
+}
+
+bool GroupingSet::isPartialFull(const RowVectorPtr& input) {
+  VELOX_CHECK(isPartial_);
+  if (!table_) {
+    createHashTable();
+  }
+  if (!isFitting(input)) {
+    return true;
+  }
+  return false;
 }
 
 uint64_t GroupingSet::allocatedBytes() const {

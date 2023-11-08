@@ -227,16 +227,7 @@ bool HashAggregation::abandonPartialAggregationEarly(int64_t numOutput) const {
       100 * numOutput / numInputRows_ >= abandonPartialAggregationMinPct_;
 }
 
-void HashAggregation::addInput(RowVectorPtr input) {
-  if (!pushdownChecked_) {
-    mayPushdown_ = operatorCtx_->driver()->mayPushdownAggregation(this);
-    pushdownChecked_ = true;
-  }
-  if (abandonedPartialAggregation_) {
-    input_ = input;
-    numInputRows_ += input->size();
-    return;
-  }
+void HashAggregation::addGroupingSetInput(RowVectorPtr input) {
   groupingSet_->addInput(input, mayPushdown_);
   numInputRows_ += input->size();
 
@@ -267,6 +258,29 @@ void HashAggregation::addInput(RowVectorPtr input) {
       partialFull_ = false;
     }
   }
+}
+
+void HashAggregation::addInput(RowVectorPtr input) {
+  if (!pushdownChecked_) {
+    mayPushdown_ = operatorCtx_->driver()->mayPushdownAggregation(this);
+    pushdownChecked_ = true;
+  }
+
+  if (abandonedPartialAggregation_) {
+    input_ = input;
+    numInputRows_ += input->size();
+    return;
+  }
+
+  if (isPartialOutput_ && !isGlobal_) {
+    if (groupingSet_->isPartialFull(input)) {
+      VELOX_CHECK_NULL(partialPendingInput_)
+      partialPendingInput_ = input;
+      partialFull_ = true;
+      return;
+    }
+  }
+  addGroupingSetInput(input);
 }
 
 void HashAggregation::updateRuntimeStats() {
@@ -381,6 +395,13 @@ void HashAggregation::maybeIncreasePartialAggregationMemoryUsage(
           maxPartialAggregationMemoryUsage_, RuntimeCounter::Unit::kBytes));
 }
 
+void HashAggregation::reAddPartialPendingInput() {
+  if (partialPendingInput_) {
+    addGroupingSetInput(partialPendingInput_);
+    partialPendingInput_ = nullptr;
+  }
+}
+
 RowVectorPtr HashAggregation::getOutput() {
   if (finished_) {
     input_ = nullptr;
@@ -412,7 +433,9 @@ RowVectorPtr HashAggregation::getOutput() {
   }
 
   if (isDistinct_) {
-    return getDistinctOutput();
+    const RowVectorPtr& out = getDistinctOutput();
+    reAddPartialPendingInput();
+    return out;
   }
 
   const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
@@ -432,6 +455,7 @@ RowVectorPtr HashAggregation::getOutput() {
       finished_ = true;
     }
     resetPartialOutputIfNeed();
+    reAddPartialPendingInput();
     return nullptr;
   }
   numOutputRows_ += output_->size();

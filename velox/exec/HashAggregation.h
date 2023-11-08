@@ -57,6 +57,10 @@ class HashAggregation : public Operator {
 
   void prepareOutput(vector_size_t size);
 
+  void addGroupingSetInput(RowVectorPtr input);
+
+  void reAddPartialPendingInput();
+
   // Invoked to reset partial aggregation state if it was full and has been
   // flushed.
   void resetPartialOutputIfNeed();
@@ -100,6 +104,8 @@ class HashAggregation : public Operator {
   // 'groupingSet_->estimateRowSize()'. If spilling, this value is set to max
   // 'groupingSet_->estimateRowSize()' across all accumulated data set.
   std::optional<int64_t> estimatedOutputRowSize_;
+
+  RowVectorPtr partialPendingInput_;
 
   bool partialFull_ = false;
   bool newDistincts_ = false;

@@ -199,6 +199,7 @@ MemoryPool::MemoryPool(
       alignment_(options.alignment),
       parent_(std::move(parent)),
       maxCapacity_(parent_ == nullptr ? options.maxCapacity : kMaxMemory),
+      growthQuantum_(options.growthQuantum),
       trackUsage_(options.trackUsage),
       threadSafe_(options.threadSafe),
       checkUsageLeak_(options.checkUsageLeak),
@@ -634,6 +635,7 @@ std::shared_ptr<MemoryPool> MemoryPoolImpl::genChild(
       nullptr,
       Options{
           .alignment = alignment_,
+          .growthQuantum = growthQuantum_,
           .trackUsage = trackUsage_,
           .threadSafe = threadSafe,
           .checkUsageLeak = checkUsageLeak_,
@@ -644,9 +646,7 @@ bool MemoryPoolImpl::maybeReserve(uint64_t increment) {
   CHECK_AND_INC_MEM_OP_STATS(Reserves);
   TestValue::adjust(
       "facebook::velox::common::memory::MemoryPoolImpl::maybeReserve", this);
-  // TODO: make this a configurable memory pool option.
-  constexpr int32_t kGrowthQuantum = 8 << 20;
-  const auto reservationToAdd = bits::roundUp(increment, kGrowthQuantum);
+  const auto reservationToAdd = bits::roundUp(increment, growthQuantum_);
   try {
     reserve(reservationToAdd, true);
   } catch (const std::exception& e) {

@@ -81,6 +81,8 @@ class GroupingSet {
   /// all the inputs.
   void resetTable();
 
+  bool isPartialFull(const RowVectorPtr& input);
+
   /// Returns true if 'this' should start producing partial
   /// aggregation results. Checks the memory consumption against
   /// 'maxBytes'. If exceeding 'maxBytes', sees if changing hash mode
@@ -162,6 +164,8 @@ class GroupingSet {
   void addInputForActiveRows(const RowVectorPtr& input, bool mayPushdown);
 
   void addRemainingInput();
+
+  bool isFitting(const RowVectorPtr& input);
 
   void initializeGlobalAggregation();
 
