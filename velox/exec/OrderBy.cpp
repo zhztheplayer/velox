@@ -79,6 +79,19 @@ void OrderBy::reclaim(
   VELOX_CHECK(canReclaim());
   VELOX_CHECK(!nonReclaimableSection_);
 
+  // FXIME Hongze: https://github.com/facebookincubator/velox/pull/775 causes
+  //   error on CI Q67 low mem job. Disable post spill temporarily.
+  if (noMoreInput_) {
+    // TODO: reduce the log frequency if it is too verbose.
+    ++stats.numNonReclaimableAttempts;
+    LOG(WARNING)
+        << "Can't reclaim from order by operator which has started producing output: "
+        << pool()->name()
+        << ", usage: " << succinctBytes(pool()->currentBytes())
+        << ", reservation: " << succinctBytes(pool()->reservedBytes());
+    return;
+  }
+
   // TODO: support fine-grain disk spilling based on 'targetBytes' after
   // having row container memory compaction support later.
   sortBuffer_->spill();
