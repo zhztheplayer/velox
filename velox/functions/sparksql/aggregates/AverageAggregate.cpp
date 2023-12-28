@@ -444,10 +444,9 @@ exec::AggregateRegistrationResult registerAverage(
               if (inputType->isShortDecimal()) {
                 auto inputPrecision = inputType->asShortDecimal().precision();
                 auto inputScale = inputType->asShortDecimal().scale();
-                auto sumType = getDecimalSumType(inputPrecision, inputScale);
-                if (exec::isPartialOutput(step) ||
-                    (step == core::AggregationNode::Step::kSingle &&
-                     resultType->isRow())) {
+                auto sumType =
+                    DECIMAL(std::min(38, inputPrecision + 10), inputScale);
+                if (exec::isPartialOutput(step)) {
                   return std::make_unique<
                       DecimalAverageAggregate<int64_t, int64_t>>(
                       resultType, sumType);
