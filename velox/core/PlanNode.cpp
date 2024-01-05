@@ -233,16 +233,8 @@ bool AggregationNode::canSpill(const QueryConfig& queryConfig) const {
   }
   // TODO: add spilling for pre-grouped aggregation later:
   // https://github.com/facebookincubator/velox/issues/3264
-  if ((isFinal() || isSingle()) && queryConfig.aggregationSpillEnabled()) {
-    return preGroupedKeys().empty();
-  }
-
-  if ((isIntermediate() || isPartial()) &&
-      queryConfig.partialAggregationSpillEnabled()) {
-    return preGroupedKeys().empty();
-  }
-
-  return false;
+  return (isFinal() || isSingle()) && preGroupedKeys().empty() &&
+      queryConfig.aggregationSpillEnabled();
 }
 
 void AggregationNode::addDetails(std::stringstream& stream) const {

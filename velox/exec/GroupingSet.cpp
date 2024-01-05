@@ -702,7 +702,6 @@ bool GroupingSet::getOutput(
   }
 
   if (hasSpilled()) {
-    spill();
     return getOutputWithSpill(maxOutputRows, maxOutputBytes, result);
   }
   VELOX_CHECK(!isDistinct());
@@ -804,7 +803,7 @@ const HashLookup& GroupingSet::hashLookup() const {
 void GroupingSet::ensureInputFits(const RowVectorPtr& input) {
   // Spilling is considered if this is a final or single aggregation and
   // spillPath is set.
-  if (spillConfig_ == nullptr) {
+  if (isPartial_ || spillConfig_ == nullptr) {
     return;
   }
 
@@ -889,7 +888,7 @@ void GroupingSet::ensureOutputFits() {
   // to reserve memory for the output as we can't reclaim much memory from this
   // operator itself. The output processing can reclaim memory from the other
   // operator or query through memory arbitration.
-  if (spillConfig_ == nullptr || hasSpilled()) {
+  if (isPartial_ || spillConfig_ == nullptr || hasSpilled()) {
     return;
   }
 
@@ -939,6 +938,7 @@ void GroupingSet::spill() {
   if (table_ == nullptr || table_->numDistinct() == 0) {
     return;
   }
+
   if (!hasSpilled()) {
     auto rows = table_->rows();
     VELOX_DCHECK(pool_.trackUsage());
@@ -1013,16 +1013,7 @@ bool GroupingSet::getOutputWithSpill(
   if (merge_ == nullptr) {
     return false;
   }
-  bool hasData = mergeNext(maxOutputRows, maxOutputBytes, result);
-  if (!hasData) {
-    // If spill has been finalized, reset merge stream and spiller. This would
-    // help partial aggregation replay the spilling procedure once needed again.
-    merge_ = nullptr;
-    mergeRows_ = nullptr;
-    mergeArgs_.clear();
-    spiller_ = nullptr;
-  }
-  return hasData;
+  return mergeNext(maxOutputRows, maxOutputBytes, result);
 }
 
 bool GroupingSet::mergeNext(
