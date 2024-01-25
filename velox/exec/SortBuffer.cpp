@@ -15,6 +15,7 @@
  */
 
 #include "SortBuffer.h"
+#include <iostream>
 #include "velox/exec/MemoryReclaimer.h"
 
 namespace facebook::velox::exec {
@@ -308,22 +309,27 @@ void SortBuffer::prepareOutput(uint32_t maxOutputRows) {
       std::min<vector_size_t>(numInputRows_ - numOutputRows_, maxOutputRows);
   if (output_ != nullptr) {
     VectorPtr output = std::move(output_);
+    std::cout << "-----------------> 312" << std::endl;
     BaseVector::prepareForReuse(output, batchSize);
     output_ = std::static_pointer_cast<RowVector>(output);
   } else {
+    std::cout << "-----------------> 316" << std::endl;
     output_ = std::static_pointer_cast<RowVector>(
         BaseVector::create(input_, batchSize, pool_));
   }
 
+  std::cout << "-----------------> 321" << std::endl;
   for (auto& child : output_->children()) {
     child->resize(batchSize);
   }
 
+  std::cout << "-----------------> 326" << std::endl;
   if (spiller_ != nullptr) {
     spillSources_.resize(maxOutputRows);
     spillSourceRows_.resize(maxOutputRows);
   }
 
+  std::cout << "-----------------> 332" << std::endl;
   VELOX_CHECK_GT(output_->size(), 0);
   VELOX_DCHECK_LE(output_->size(), maxOutputRows);
   VELOX_CHECK_LE(output_->size() + numOutputRows_, numInputRows_);
