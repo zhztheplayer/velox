@@ -1621,8 +1621,7 @@ TEST_F(CastExprTest, decimalToDecimal) {
           makeNullableFlatVector<int128_t>(
               {DecimalUtil::kLongDecimalMin}, DECIMAL(38, 0)),
           makeNullableFlatVector<int128_t>({0}, DECIMAL(38, 1))),
-      "Cannot cast DECIMAL '-99999999999999999999999999999999999999' to
-DECIMAL(38, 1)");
+      "Cannot cast DECIMAL '-99999999999999999999999999999999999999' to DECIMAL(38, 1)");
 }
 
 TEST_F(CastExprTest, integerToDecimal) {
@@ -1900,9 +1899,9 @@ TEST_F(CastExprTest, varcharToDecimal) {
       {"-3E-"},
       "Cannot cast VARCHAR '-3E-' to DECIMAL(12, 2). Value is not a number. The exponent part only contains sign.");
 }
-*/
+* /
 
-TEST_F(CastExprTest, castInTry) {
+    TEST_F(CastExprTest, castInTry) {
   // Test try(cast(array(varchar) as array(bigint))) whose input vector is
   // wrapped in dictinary encoding. The row of ["2a"] should trigger an error
   // during casting and the try expression should turn this error into a null
