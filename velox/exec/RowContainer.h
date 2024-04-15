@@ -25,8 +25,6 @@
 
 namespace facebook::velox::exec {
 
-using NextRowVector = std::vector<char*, StlAllocator<char*>>;
-
 class Aggregate;
 
 class Accumulator {
@@ -639,15 +637,6 @@ class RowContainer {
     return nextOffset_;
   }
 
-  // Create a next-row-vector if it doesn't exist. Append the row address to
-  // the next-row-vector, and store the address of the next-row-vector in the
-  // nextOffset_ slot for all duplicate rows.
-  void appendNextRow(char* current, char* nextRow);
-
-  NextRowVector*& getNextRowVector(char* row) const {
-    return *reinterpret_cast<NextRowVector**>(row + nextOffset_);
-  }
-
   /// Hashes the values of 'columnIndex' for 'rows'.  If 'mix' is true, mixes
   /// the hash with the existing value in 'result'.
   void hash(
@@ -679,9 +668,6 @@ class RowContainer {
 
   /// Resets the state to be as after construction. Frees memory for payload.
   void clear();
-
-  /// Frees memory for next row vectors.
-  void clearNextRowVectors();
 
   int32_t compareRows(
       const char* left,
@@ -1229,11 +1215,6 @@ class RowContainer {
   // Free any aggregates associated with the 'rows'.
   void freeAggregates(folly::Range<char**> rows);
 
-  // Free next row vectors associated with the 'rows'.
-  void freeNextRowVectors(folly::Range<char**> rows, bool clear);
-
-  void freeRowsExtraMemory(folly::Range<char**> rows, bool clear);
-
   const bool checkFree_ = false;
 
   const std::vector<TypePtr> keyTypes_;
@@ -1253,7 +1234,6 @@ class RowContainer {
   std::vector<TypePtr> types_;
   std::vector<TypeKind> typeKinds_;
   int32_t nextOffset_ = 0;
-  bool hasDuplicateRows_{false};
   // Bit position of null bit  in the row. 0 if no null flag. Order is keys,
   // accumulators, dependent.
   std::vector<int32_t> nullOffsets_;
