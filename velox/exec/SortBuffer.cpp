@@ -197,6 +197,11 @@ void SortBuffer::ensureInputFits(const VectorPtr& input) {
   if (numRows > 0 && spillConfig_->testSpillPct &&
       (folly::hasher<uint64_t>()(++spillTestCounter_)) % 100 <=
           spillConfig_->testSpillPct) {
+    LOG(ERROR) << "[SORT BUFFER DEBUG 1] "
+               << fmt::format(
+                      "spillTestCounter_: {}, testSpillPct: {}",
+                      spillTestCounter_,
+                      spillConfig_->testSpillPct);
     spill();
     return;
   }
@@ -205,6 +210,11 @@ void SortBuffer::ensureInputFits(const VectorPtr& input) {
   const auto currentMemoryUsage = pool_->currentBytes();
   if (spillMemoryThreshold_ != 0 &&
       currentMemoryUsage > spillMemoryThreshold_) {
+    LOG(ERROR) << "[SORT BUFFER DEBUG 2] "
+               << fmt::format(
+                      "spillMemoryThreshold_: {}, currentMemoryUsage: {}",
+                      spillMemoryThreshold_,
+                      currentMemoryUsage);
     spill();
     return;
   }
