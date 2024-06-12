@@ -35,12 +35,12 @@ std::vector<TypedExprPtr> deserializeInputs(
   return {};
 }
 
-std::string truncate(std::string text, int32_t toLength) {
-  if (text.size() >= toLength) {
+std::string truncate(std::string text, int32_t maxLength) {
+  if (text.size() <= maxLength) {
     return text;
   }
   static const std::string suffix = "...";
-  return text.substr(0, toLength - suffix.size()) + suffix;
+  return text.substr(0, maxLength - suffix.size()) + suffix;
 }
 } // namespace
 
