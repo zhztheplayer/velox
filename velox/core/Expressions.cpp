@@ -34,6 +34,14 @@ std::vector<TypedExprPtr> deserializeInputs(
 
   return {};
 }
+
+std::string truncate(std::string text, int32_t toLength) {
+  if (text.size() >= toLength) {
+    return text;
+  }
+  static const std::string suffix = "...";
+  return text.substr(0, toLength - suffix.size()) + suffix;
+}
 } // namespace
 
 folly::dynamic ITypedExpr::serializeBase(std::string_view name) const {
@@ -111,6 +119,13 @@ TypedExprPtr ConstantTypedExpr::create(
   auto* pool = static_cast<memory::MemoryPool*>(context);
 
   return std::make_shared<ConstantTypedExpr>(restoreVector(dataStream, pool));
+}
+
+std::string ConstantTypedExpr::toString() const {
+  if (hasValueVector()) {
+    return truncate(valueVector_->toString(0), 100);
+  }
+  return truncate(value_.toJson(type()), 100);
 }
 
 folly::dynamic CallTypedExpr::serialize() const {

@@ -67,12 +67,7 @@ class ConstantTypedExpr : public ITypedExpr {
                 ? value
                 : BaseVector::wrapInConstant(1, 0, value)} {}
 
-  std::string toString() const override {
-    if (hasValueVector()) {
-      return valueVector_->toString(0);
-    }
-    return value_.toJson(type());
-  }
+  std::string toString() const override;
 
   size_t localHash() const override {
     static const size_t kBaseHash =
