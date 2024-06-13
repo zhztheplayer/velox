@@ -126,7 +126,7 @@ HiveDataSource::HiveDataSource(
     const auto end = getCurrentTimeMicro();
     compileCount++;
     std::cout << "COMPILE ACC COUNT: " << compileCount
-              << ", MILLIS: " << (start - end) * 1000 << std::endl;
+              << ", MILLIS: " << (end - start) * 1000 << std::endl;
     auto& remainingFilterExpr = remainingFilterExprSet_->expr(0);
     folly::F14FastMap<std::string, column_index_t> columnNames;
     for (int i = 0; i < readerRowNames.size(); ++i) {
