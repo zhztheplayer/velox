@@ -19,6 +19,7 @@
 #include <string>
 #include <unordered_map>
 
+#include <iostream>
 #include "velox/connectors/hive/HiveConfig.h"
 #include "velox/connectors/hive/HiveConnectorUtil.h"
 #include "velox/dwio/common/ReaderFactory.h"
@@ -119,7 +120,13 @@ HiveDataSource::HiveDataSource(
 
   std::vector<common::Subfield> remainingFilterSubfields;
   if (remainingFilter) {
+    static std::atomic<int32_t> compileCount(0);
+    const auto start = getCurrentTimeMicro();
     remainingFilterExprSet_ = expressionEvaluator_->compile(remainingFilter);
+    const auto end = getCurrentTimeMicro();
+    compileCount++;
+    std::cout << "COMPILE ACC COUNT: " << compileCount
+              << ", MILLIS: " << (start - end) * 1000 << std::endl;
     auto& remainingFilterExpr = remainingFilterExprSet_->expr(0);
     folly::F14FastMap<std::string, column_index_t> columnNames;
     for (int i = 0; i < readerRowNames.size(); ++i) {
