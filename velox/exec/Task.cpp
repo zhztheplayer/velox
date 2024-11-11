@@ -604,15 +604,16 @@ bool Task::supportSerialExecutionMode() const {
     return false;
   }
 
-  std::vector<std::unique_ptr<DriverFactory>> driverFactories;
-  LocalPlanner::plan(
-      planFragment_, nullptr, &driverFactories, queryCtx_->queryConfig(), 1);
-
-  for (const auto& factory : driverFactories) {
-    if (!factory->supportsSerialExecution()) {
-      return false;
-    }
-  }
+  //  std::vector<std::unique_ptr<DriverFactory>> driverFactories;
+  //  LocalPlanner::plan(
+  //      planFragment_, nullptr, &driverFactories, queryCtx_->queryConfig(),
+  //      1);
+  //
+  //  for (const auto& factory : driverFactories) {
+  //    if (!factory->supportsSerialExecution()) {
+  //      return false;
+  //    }
+  //  }
 
   return true;
 }
@@ -1887,7 +1888,7 @@ template <class TBridgeType, typename MemberType>
 std::shared_ptr<TBridgeType> Task::getJoinBridgeInternalLocked(
     uint32_t splitGroupId,
     const core::PlanNodeId& planNodeId,
-    MemberType SplitGroupState::*bridges_member) {
+    MemberType SplitGroupState::* bridges_member) {
   const auto& splitGroupState = splitGroupStates_[splitGroupId];
 
   auto it = (splitGroupState.*bridges_member).find(planNodeId);
