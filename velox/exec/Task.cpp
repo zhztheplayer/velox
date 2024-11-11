@@ -655,7 +655,6 @@ RowVectorPtr Task::next(ContinueFuture* future) {
 
     // In Task::next() we always assume ungrouped execution.
     for (const auto& factory : driverFactories_) {
-      VELOX_CHECK(factory->supportsSerialExecution());
       numDriversUngrouped_ += factory->numDrivers;
       numTotalDrivers_ += factory->numTotalDrivers;
       taskStats_.pipelineStats.emplace_back(
