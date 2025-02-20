@@ -60,11 +60,11 @@ folly::dynamic HiveConnectorSplit::serialize() const {
   if (bucketConversion.has_value()) {
     folly::dynamic bucketConversionObj = folly::dynamic::object;
     bucketConversionObj["tableBucketCount"] =
-        bucketConversion.value().tableBucketCount;
+        bucketConversion->tableBucketCount;
     bucketConversionObj["partitionBucketCount"] =
-        bucketConversion.value().partitionBucketCount;
+        bucketConversion->partitionBucketCount;
     folly::dynamic bucketColumnHandlesArray = folly::dynamic::array;
-    for (const auto& handle : bucketConversion.value().bucketColumnHandles) {
+    for (const auto& handle : bucketConversion->bucketColumnHandles) {
       bucketColumnHandlesArray.push_back(handle->serialize());
     }
     bucketConversionObj["bucketColumnHandles"] = bucketColumnHandlesArray;
