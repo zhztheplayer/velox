@@ -168,7 +168,7 @@ class HiveConnectorSplitBuilder {
 
   HiveConnectorSplitBuilder& bucketConversion(
       HiveBucketConversion bucketConversion) {
-    bucketConversion_ = bucketConversion;
+    bucketConversion_ = std::move(bucketConversion);
     return *this;
   }
 
