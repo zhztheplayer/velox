@@ -962,6 +962,72 @@ TEST_F(AggregationTest, partialDistinctWithAbandon) {
              .assertResults("SELECT distinct c0, sum(c0) FROM tmp group by c0");
 }
 
+TEST_F(AggregationTest, partialAggregationDisableFlush) {
+  auto vectors = {
+      makeRowVector({makeFlatVector<int32_t>(
+          100, [](auto row) { return row; }, nullEvery(5))}),
+      makeRowVector({makeFlatVector<int32_t>(
+          110, [](auto row) { return row + 29; }, nullEvery(7))}),
+      makeRowVector({makeFlatVector<int32_t>(
+          90, [](auto row) { return row - 71; }, nullEvery(7))}),
+  };
+
+  createDuckDbTable(vectors);
+
+  core::PlanNodeId partialAggNodeId;
+  core::PlanNodeId intermediateAggNodeId;
+  auto task =
+      AssertQueryBuilder(duckDbQueryRunner_)
+          .config(QueryConfig::kMaxPartialAggregationMemory, 1)
+          .plan(PlanBuilder()
+                    .values(vectors)
+                    .partialAggregation({"c0"}, {"count(1) as a0"}, {}, false)
+                    .capturePlanNodeId(partialAggNodeId)
+                    .intermediateAggregation(
+                        {"c0"}, {"count(a0)"}, {{BIGINT()}}, false)
+                    .capturePlanNodeId(intermediateAggNodeId)
+                    .finalAggregation()
+                    .planNode())
+          .assertResults("SELECT c0, count(1) FROM tmp GROUP BY 1");
+  EXPECT_EQ(
+      toPlanStats(task->taskStats())
+          .at(partialAggNodeId)
+          .customStats.count("flushRowCount"),
+      0);
+  EXPECT_EQ(
+      toPlanStats(task->taskStats())
+          .at(intermediateAggNodeId)
+          .customStats.count("flushRowCount"),
+      0);
+}
+
+TEST_F(AggregationTest, finalAggregationEnableFlush) {
+  auto vectors = makeVectors(rowType_, 100, 10);
+
+  createDuckDbTable(vectors);
+
+  VELOX_ASSERT_THROW(
+      PlanBuilder()
+          .values(vectors)
+          .partialAggregation({"c0"}, {"count(1) as a0"})
+          .finalAggregation({"c0"}, {"count(a0)"}, {{BIGINT()}}, true)
+          .planNode(),
+      "Flushing is prohibited for final and single steps");
+}
+
+TEST_F(AggregationTest, singleAggregationEnableFlush) {
+  auto vectors = makeVectors(rowType_, 100, 10);
+
+  createDuckDbTable(vectors);
+
+  VELOX_ASSERT_THROW(
+      PlanBuilder()
+          .values(vectors)
+          .singleAggregation({"c0"}, {"count(1)"}, {}, true)
+          .planNode(),
+      "Flushing is prohibited for final and single steps");
+}
+
 TEST_F(AggregationTest, distinctWithGroupingKeysReordered) {
   rowType_ =
       ROW({"c0", "c1", "c2", "c3", "c4"},

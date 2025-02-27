@@ -86,6 +86,7 @@ class HashAggregation : public Operator {
 
   std::shared_ptr<const core::AggregationNode> aggregationNode_;
 
+  const bool allowFlush_;
   const bool isPartialOutput_;
   const bool isGlobal_;
   const bool isDistinct_;

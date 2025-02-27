@@ -122,6 +122,7 @@ AggregationNode::AggregationNode(
     const std::vector<vector_size_t>& globalGroupingSets,
     const std::optional<FieldAccessTypedExprPtr>& groupId,
     bool ignoreNullKeys,
+    bool allowFlush,
     PlanNodePtr source)
     : PlanNode(id),
       step_(step),
@@ -130,9 +131,10 @@ AggregationNode::AggregationNode(
       aggregateNames_(aggregateNames),
       aggregates_(aggregates),
       ignoreNullKeys_(ignoreNullKeys),
+      allowFlush_(allowFlush),
       groupId_(groupId),
       globalGroupingSets_(globalGroupingSets),
-      sources_{source},
+      sources_{std::move(source)},
       outputType_(getAggregationOutputType(
           groupingKeys_,
           aggregateNames_,
@@ -176,6 +178,11 @@ AggregationNode::AggregationNode(
     VELOX_USER_CHECK(
         groupId_.has_value(), "Global grouping sets require GroupId key");
   }
+
+  if (isFinal() || isSingle()) {
+    VELOX_CHECK(
+        !allowFlush_, "Flushing is prohibited for final and single steps");
+  }
 }
 
 AggregationNode::AggregationNode(
@@ -197,7 +204,8 @@ AggregationNode::AggregationNode(
           {},
           std::nullopt,
           ignoreNullKeys,
-          source) {}
+          isFlushAllowedForStepByDefault(step),
+          std::move(source)) {}
 
 namespace {
 void addFields(
@@ -248,8 +256,23 @@ bool AggregationNode::canSpill(const QueryConfig& queryConfig) const {
   }
   // TODO: add spilling for pre-grouped aggregation later:
   // https://github.com/facebookincubator/velox/issues/3264
-  return (isFinal() || isSingle()) && !groupingKeys().empty() &&
-      preGroupedKeys().empty() && queryConfig.aggregationSpillEnabled();
+  if (!preGroupedKeys().empty()) {
+    return false;
+  }
+
+  if ((isPartial() || isIntermediate())) {
+    return false;
+  }
+
+  if (!queryConfig.aggregationSpillEnabled()) {
+    return false;
+  }
+
+  if (allowFlush_) {
+    return false;
+  }
+
+  return true;
 }
 
 void AggregationNode::addDetails(std::stringstream& stream) const {
@@ -329,6 +352,20 @@ AggregationNode::Step AggregationNode::stepFromName(const std::string& name) {
   return it->second;
 }
 
+bool AggregationNode::isFlushAllowedForStepByDefault(Step step) {
+  switch (step) {
+    case Step::kPartial:
+    case Step::kIntermediate:
+      return true;
+    case Step::kFinal:
+    case Step::kSingle:
+      return false;
+      break;
+    default:
+      VELOX_FAIL("Unexpected aggregation step: {}", stepName(step));
+  }
+}
+
 folly::dynamic AggregationNode::serialize() const {
   auto obj = PlanNode::serialize();
   obj["step"] = stepName(step_);
@@ -349,6 +386,7 @@ folly::dynamic AggregationNode::serialize() const {
     obj["groupId"] = ISerializable::serialize(groupId_.value());
   }
   obj["ignoreNullKeys"] = ignoreNullKeys_;
+  obj["allowFlush"] = allowFlush_;
   return obj;
 }
 
@@ -458,6 +496,7 @@ PlanNodePtr AggregationNode::create(const folly::dynamic& obj, void* context) {
       globalGroupingSets,
       groupId,
       obj["ignoreNullKeys"].asBool(),
+      obj["allowFlush"].asBool(),
       deserializeSingleSource(obj, context));
 }
 

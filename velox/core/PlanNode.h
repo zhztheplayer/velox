@@ -608,6 +608,9 @@ class AggregationNode : public PlanNode {
 
   static Step stepFromName(const std::string& name);
 
+  /// The default flushing behavior according to the aggregation step.
+  static bool isFlushAllowedForStepByDefault(Step step);
+
   /// Aggregate function call.
   struct Aggregate {
     /// Function name and input column names.
@@ -667,6 +670,7 @@ class AggregationNode : public PlanNode {
       const std::vector<vector_size_t>& globalGroupingSets,
       const std::optional<FieldAccessTypedExprPtr>& groupId,
       bool ignoreNullKeys,
+      bool allowFlush,
       PlanNodePtr source);
 
   const std::vector<PlanNodePtr>& sources() const override {
@@ -714,6 +718,10 @@ class AggregationNode : public PlanNode {
     return ignoreNullKeys_;
   }
 
+  bool allowFlush() const {
+    return allowFlush_;
+  }
+
   const std::vector<vector_size_t>& globalGroupingSets() const {
     return globalGroupingSets_;
   }
@@ -736,6 +744,14 @@ class AggregationNode : public PlanNode {
     return step_ == Step::kSingle;
   }
 
+  bool isIntermediate() const {
+    return step_ == Step::kIntermediate;
+  }
+
+  bool isPartial() const {
+    return step_ == Step::kPartial;
+  }
+
   folly::dynamic serialize() const override;
 
   static PlanNodePtr create(const folly::dynamic& obj, void* context);
@@ -749,6 +765,7 @@ class AggregationNode : public PlanNode {
   const std::vector<std::string> aggregateNames_;
   const std::vector<Aggregate> aggregates_;
   const bool ignoreNullKeys_;
+  const bool allowFlush_;
 
   std::optional<FieldAccessTypedExprPtr> groupId_;
   std::vector<vector_size_t> globalGroupingSets_;

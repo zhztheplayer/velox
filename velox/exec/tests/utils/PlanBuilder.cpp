@@ -665,7 +665,6 @@ class AggregateTypeResolver {
   const core::Expressions::TypeResolverHook previousHook_;
   std::vector<TypePtr> rawInputTypes_;
 };
-
 } // namespace
 
 core::PlanNodePtr PlanBuilder::createIntermediateOrFinalAggregation(
@@ -889,6 +888,7 @@ PlanBuilder& PlanBuilder::aggregation(
     const std::vector<std::string>& masks,
     core::AggregationNode::Step step,
     bool ignoreNullKeys,
+    bool allowFlush,
     const std::vector<std::vector<TypePtr>>& rawInputTypes) {
   auto aggregatesAndNames = createAggregateExpressionsAndNames(
       aggregates, masks, step, rawInputTypes);
@@ -921,6 +921,7 @@ PlanBuilder& PlanBuilder::aggregation(
       globalGroupingSets,
       groupId,
       ignoreNullKeys,
+      allowFlush,
       planNode_);
   return *this;
 }

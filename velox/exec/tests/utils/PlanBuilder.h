@@ -685,14 +685,18 @@ class PlanBuilder {
   PlanBuilder& partialAggregation(
       const std::vector<std::string>& groupingKeys,
       const std::vector<std::string>& aggregates,
-      const std::vector<std::string>& masks = {}) {
+      const std::vector<std::string>& masks = {},
+      bool allowFlush = core::AggregationNode::isFlushAllowedForStepByDefault(
+          core::AggregationNode::Step::kPartial)) {
     return aggregation(
         groupingKeys,
         {},
         aggregates,
         masks,
         core::AggregationNode::Step::kPartial,
-        false);
+        false,
+        allowFlush,
+        {});
   }
 
   /// Add final aggregation plan node to match the current partial aggregation
@@ -709,7 +713,9 @@ class PlanBuilder {
   PlanBuilder& finalAggregation(
       const std::vector<std::string>& groupingKeys,
       const std::vector<std::string>& aggregates,
-      const std::vector<std::vector<TypePtr>>& rawInputTypes) {
+      const std::vector<std::vector<TypePtr>>& rawInputTypes,
+      bool allowFlush = core::AggregationNode::isFlushAllowedForStepByDefault(
+          core::AggregationNode::Step::kFinal)) {
     return aggregation(
         groupingKeys,
         {},
@@ -717,6 +723,7 @@ class PlanBuilder {
         {},
         core::AggregationNode::Step::kFinal,
         false,
+        allowFlush,
         rawInputTypes);
   }
 
@@ -730,14 +737,19 @@ class PlanBuilder {
   /// aggregate expressions and their types.
   PlanBuilder& intermediateAggregation(
       const std::vector<std::string>& groupingKeys,
-      const std::vector<std::string>& aggregates) {
+      const std::vector<std::string>& aggregates,
+      const std::vector<std::vector<TypePtr>>& rawInputTypes,
+      bool allowFlush = core::AggregationNode::isFlushAllowedForStepByDefault(
+          core::AggregationNode::Step::kIntermediate)) {
     return aggregation(
         groupingKeys,
         {},
         aggregates,
         {},
         core::AggregationNode::Step::kIntermediate,
-        false);
+        false,
+        allowFlush,
+        rawInputTypes);
   }
 
   /// Add a single aggregation plan node using specified grouping keys and
@@ -746,14 +758,18 @@ class PlanBuilder {
   PlanBuilder& singleAggregation(
       const std::vector<std::string>& groupingKeys,
       const std::vector<std::string>& aggregates,
-      const std::vector<std::string>& masks = {}) {
+      const std::vector<std::string>& masks = {},
+      bool allowFlush = core::AggregationNode::isFlushAllowedForStepByDefault(
+          core::AggregationNode::Step::kSingle)) {
     return aggregation(
         groupingKeys,
         {},
         aggregates,
         masks,
         core::AggregationNode::Step::kSingle,
-        false);
+        false,
+        allowFlush,
+        {});
   }
 
   /// Add an AggregationNode using specified grouping keys,
@@ -802,6 +818,7 @@ class PlanBuilder {
         masks,
         step,
         ignoreNullKeys,
+        core::AggregationNode::isFlushAllowedForStepByDefault(step),
         {});
   }
 
@@ -1352,6 +1369,7 @@ class PlanBuilder {
       const std::vector<std::string>& masks,
       core::AggregationNode::Step step,
       bool ignoreNullKeys,
+      bool allowFlush,
       const std::vector<std::vector<TypePtr>>& rawInputTypes);
 
   /// Create WindowNode based on whether input is sorted and then compute the

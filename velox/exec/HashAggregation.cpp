@@ -38,6 +38,7 @@ HashAggregation::HashAggregation(
               ? driverCtx->makeSpillConfig(operatorId)
               : std::nullopt),
       aggregationNode_(aggregationNode),
+      allowFlush_(aggregationNode_->allowFlush()),
       isPartialOutput_(isPartialOutput(aggregationNode->step())),
       isGlobal_(aggregationNode->groupingKeys().empty()),
       isDistinct_(!isGlobal_ && aggregationNode->aggregates().empty()),
@@ -192,7 +193,7 @@ void HashAggregation::addInput(RowVectorPtr input) {
   // partial aggregator. Hence, we have to use more memory anyway.
   const bool abandonPartialEarly = isPartialOutput_ && !isGlobal_ &&
       abandonPartialAggregationEarly(groupingSet_->numDistinct());
-  if (isPartialOutput_ && !isGlobal_ &&
+  if (allowFlush_ && isPartialOutput_ && !isGlobal_ &&
       (abandonPartialEarly ||
        groupingSet_->isPartialFull(maxPartialAggregationMemoryUsage_))) {
     partialFull_ = true;
