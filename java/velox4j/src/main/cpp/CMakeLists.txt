@@ -74,7 +74,9 @@ FetchContent_Declare(
   GIT_TAG ${JNI_HELPERS_REF} # release-1.10.0
 )
 FetchContent_MakeAvailable(JniHelpersLib)
-target_link_libraries(JniHelpers PRIVATE JNI::JNI)
+target_link_libraries(
+  JniHelpers
+  PRIVATE JNI::JNI)
 
 # Directories of Velox4J.
 set(VELOX4J_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/main)
