@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-\name: Java Bindings - C++ UT
+name: Java Bindings - C++ UT
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
             java-ut-cpp-ut-centos7-ccache-
       - name: Run setup script / Build and run UTs
         run: |
-          docker run -v ${{ github.workspace }}:/velox -w /velox centos:7 bash -c "
+          docker run -v ${{ github.workspace }}:/velox -w / centos:7 bash -c "
             export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
             cd /velox/java/velox4j
