@@ -62,7 +62,7 @@ jobs:
             export CCACHE_MAXSIZE=3000M
             cd /velox
             bash scripts/java/gha/ut-java/setup-ubuntu24.sh
-            cd /java/velox4j
+            cd /velox/java/velox4j
             mvn clean test
           "
       - name: Save Ccache
@@ -91,7 +91,7 @@ jobs:
             export CCACHE_MAXSIZE=3000M
             cd /velox
             bash scripts/java/gha/ut-java/setup-centos7.sh
-            cd /java/velox4j
+            cd /velox/java/velox4j
             mvn clean test
           "
       - name: Save Ccache
