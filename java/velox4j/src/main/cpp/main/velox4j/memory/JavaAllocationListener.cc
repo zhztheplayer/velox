@@ -5,8 +5,7 @@
 namespace velox4j {
 
 namespace {
-const char* kClassName =
-    "io/github/zhztheplayer/velox4j/memory/AllocationListener";
+const char* kClassName = "com/meta/velox4j/memory/AllocationListener";
 }
 const char* JavaAllocationListenerJniWrapper::getCanonicalName() const {
   return kClassName;

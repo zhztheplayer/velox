@@ -19,7 +19,7 @@ namespace velox4j {
 using namespace facebook::velox;
 
 namespace {
-const char* kClassName = "io/github/zhztheplayer/velox4j/jni/JniWrapper";
+const char* kClassName = "com/meta/velox4j/jni/JniWrapper";
 
 Session* sessionOf(JNIEnv* env, jobject javaThis) {
   static const auto* clazz = jniClassRegistry()->get(kClassName);
@@ -343,7 +343,7 @@ void JniWrapper::initialize(JNIEnv* env) {
       "createExternalStreamFromDownIterator",
       (void*)createExternalStreamFromDownIterator,
       kTypeLong,
-      "io/github/zhztheplayer/velox4j/iterator/DownIterator",
+      "com/meta/velox4j/iterator/DownIterator",
       nullptr);
   addNativeMethod(
       "createBlockingQueue", (void*)createBlockingQueue, kTypeLong, nullptr);

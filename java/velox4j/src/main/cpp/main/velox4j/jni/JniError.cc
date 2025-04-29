@@ -35,7 +35,7 @@ jclass velox4j::JniErrorState::veloxExceptionClass() {
 
 void velox4j::JniErrorState::initialize(JNIEnv* env) {
   veloxExceptionClass_ = createGlobalClassReference(
-      env, "Lio/github/zhztheplayer/velox4j/exception/VeloxException;");
+      env, "Lcom/meta/velox4j/exception/VeloxException;");
   ioExceptionClass_ = createGlobalClassReference(env, "Ljava/io/IOException;");
   runtimeExceptionClass_ =
       createGlobalClassReference(env, "Ljava/lang/RuntimeException;");

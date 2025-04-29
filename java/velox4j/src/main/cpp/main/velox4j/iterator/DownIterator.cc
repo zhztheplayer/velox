@@ -6,7 +6,7 @@ namespace velox4j {
 using namespace facebook::velox;
 
 namespace {
-const char* kClassName = "io/github/zhztheplayer/velox4j/iterator/DownIterator";
+const char* kClassName = "com/meta/velox4j/iterator/DownIterator";
 } // namespace
 
 void DownIteratorJniWrapper::mapFields() {}

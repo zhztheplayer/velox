@@ -22,8 +22,8 @@ void checkException(JNIEnv* env) {
   if (env->ExceptionCheck()) {
     jthrowable t = env->ExceptionOccurred();
     env->ExceptionClear();
-    jclass describerClass = env->FindClass(
-        "io/github/zhztheplayer/velox4j/exception/ExceptionDescriber");
+    jclass describerClass =
+        env->FindClass("com/meta/velox4j/exception/ExceptionDescriber");
     jmethodID describeMethod = env->GetStaticMethodID(
         describerClass,
         "describe",

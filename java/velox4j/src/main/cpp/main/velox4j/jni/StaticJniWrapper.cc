@@ -19,7 +19,7 @@ namespace velox4j {
 using namespace facebook::velox;
 
 namespace {
-const char* kClassName = "io/github/zhztheplayer/velox4j/jni/StaticJniWrapper";
+const char* kClassName = "com/meta/velox4j/jni/StaticJniWrapper";
 
 void initialize0(JNIEnv* env, jobject javaThis, jstring globalConfJson) {
   JNI_METHOD_START
@@ -268,7 +268,7 @@ void StaticJniWrapper::initialize(JNIEnv* env) {
       "createMemoryManager",
       (void*)createMemoryManager,
       kTypeLong,
-      "io/github/zhztheplayer/velox4j/memory/AllocationListener",
+      "com/meta/velox4j/memory/AllocationListener",
       nullptr);
   addNativeMethod(
       "createSession", (void*)createSession, kTypeLong, kTypeLong, nullptr);
