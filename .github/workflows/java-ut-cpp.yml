@@ -29,9 +29,8 @@ jobs:
           docker run -v ${{ github.workspace }}:/velox -w /velox centos:7 bash -c "
             export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
-            cd /velox
-            bash scripts/java/gha/ut-cpp/setup-centos7.sh
             cd /velox/java/velox4j
+            bash scripts/gha/ut-cpp/setup-centos7.sh
             bash src/main/cpp/test.sh
           "
       - name: Save Ccache

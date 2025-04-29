@@ -45,9 +45,8 @@ jobs:
           docker run -v ${{ github.workspace }}:/velox -w / ubuntu:24.04 bash -c "
             export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
-            cd /velox
-            bash scripts/java/gha/ut-java/setup-ubuntu24.sh
             cd /velox/java/velox4j
+            bash scripts/gha/ut-java/setup-ubuntu24.sh
             mvn clean test
           "
       - name: Save Ccache
@@ -74,9 +73,8 @@ jobs:
           docker run -v ${{ github.workspace }}:/velox -w / centos:7 bash -c "
             export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
-            cd /velox
-            bash scripts/java/gha/ut-java/setup-centos7.sh
             cd /velox/java/velox4j
+            bash scripts/gha/ut-java/setup-centos7.sh
             mvn clean test
           "
       - name: Save Ccache
