@@ -16,14 +16,6 @@
     </license>
   </licenses>
 
-  <developers>
-    <developer>
-      <id>zhztheplayer</id>
-      <name>Hongze Zhang</name>
-      <email>hongze.zzz123@gmail.com</email>
-    </developer>
-  </developers>
-
   <scm>
     <connection>scm:git:git@github.com:velox4j/velox4j.git</connection>
     <developerConnection>scm:git:git@github.com:velox4j/velox4j.git</developerConnection>
