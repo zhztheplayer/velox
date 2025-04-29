@@ -182,7 +182,8 @@ You can run the following command to fix all the code style issues during develo
 the C++ code and Java code:
 
 ```shell
-bash scripts/java/gha/format/format.sh -fix
+cd java/velox4j/
+bash scripts/gha/format/format.sh -fix
 ```
 
 Note, Docker environment is required to run the script.
@@ -190,5 +191,11 @@ Note, Docker environment is required to run the script.
 If you only need to check the code format without fixing them, use the subcommand`-check` instead:
 
 ```shell
-bash scripts/java/gha/format/format.sh -check
+bash scripts/gha/format/format.sh -check
+```
+
+Specifically, the following script from outside Velox folder is reused to fix license header format issues:
+
+```shell
+scripts/check.py header main --fix
 ```
