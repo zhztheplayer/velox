@@ -23,7 +23,7 @@ mvn -version
 
 # Directory containing the source code to check
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/../../../../java/velox4j"
+SRC_DIR="$SCRIPT_DIR/../../../"
 
 # Set image name.
 IMAGE_NAME=velox4j-format
