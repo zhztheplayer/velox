@@ -52,23 +52,24 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-java-ut-ubuntu24-${{runner.arch}}-ccache-${{github.sha}}
+          key: java-ut-java-ut-ubuntu24-${{runner.arch}}-ccache-${{github.sha}}
           restore-keys: |
-            ut-java-ut-ubuntu24-${{runner.arch}}-ccache-
+            java-ut-java-ut-ubuntu24-${{runner.arch}}-ccache-
       - name: Run setup script / Build and run UTs
         run: |
-          docker run -v ${{ github.workspace }}:/velox4j -w / ubuntu:24.04 bash -c "
-            export CCACHE_DIR=/velox4j/.ccache
+          docker run -v ${{ github.workspace }}:/velox -w / ubuntu:24.04 bash -c "
+            export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
-            cd /velox4j
+            cd /velox
             bash scripts/java/gha/ut-java/setup-ubuntu24.sh
+            cd /java/velox4j
             mvn clean test
           "
       - name: Save Ccache
         uses: actions/cache/save@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-java-ut-ubuntu24-${{runner.arch}}-ccache-${{github.sha}}
+          key: java-ut-java-ut-ubuntu24-${{runner.arch}}-ccache-${{github.sha}}
 
   ut-centos7:
     runs-on: ubuntu-latest
@@ -80,20 +81,21 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-java-ut-centos7-ccache-${{github.sha}}
+          key: java-ut-java-ut-centos7-ccache-${{github.sha}}
           restore-keys: |
-            ut-java-ut-centos7-ccache-
+            java-ut-java-ut-centos7-ccache-
       - name: Run setup script / Build and run UTs
         run: |
-          docker run -v ${{ github.workspace }}:/velox4j -w / centos:7 bash -c "
-            export CCACHE_DIR=/velox4j/.ccache
+          docker run -v ${{ github.workspace }}:/velox -w / centos:7 bash -c "
+            export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
-            cd /velox4j
+            cd /velox
             bash scripts/java/gha/ut-java/setup-centos7.sh
+            cd /java/velox4j
             mvn clean test
           "
       - name: Save Ccache
         uses: actions/cache/save@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-java-ut-centos7-ccache-${{github.sha}}
+          key: java-ut-java-ut-centos7-ccache-${{github.sha}}

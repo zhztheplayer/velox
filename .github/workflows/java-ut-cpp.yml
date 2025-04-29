@@ -36,19 +36,21 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-cpp-ut-centos7-ccache-${{github.sha}}
+          key: java-ut-cpp-ut-centos7-ccache-${{github.sha}}
           restore-keys: |
-            ut-cpp-ut-centos7-ccache-
+            java-ut-cpp-ut-centos7-ccache-
       - name: Run setup script / Build and run UTs
         run: |
-          docker run -v ${{ github.workspace }}:/work -w /work centos:7 bash -c "
-            export CCACHE_DIR=/work/.ccache
+          docker run -v ${{ github.workspace }}:/velox -w /velox centos:7 bash -c "
+            export CCACHE_DIR=/velox/.ccache
             export CCACHE_MAXSIZE=3000M
+            cd /velox
             bash scripts/java/gha/ut-cpp/setup-centos7.sh
+            cd /java/velox4j
             bash src/main/cpp/test.sh
           "
       - name: Save Ccache
         uses: actions/cache/save@v4
         with:
           path: '${{ env.HOST_CCACHE_DIR }}'
-          key: ut-cpp-ut-centos7-ccache-${{github.sha}}
+          key: java-ut-cpp-ut-centos7-ccache-${{github.sha}}
