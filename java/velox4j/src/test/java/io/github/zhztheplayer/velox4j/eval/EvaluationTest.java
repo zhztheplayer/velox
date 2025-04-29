@@ -59,7 +59,7 @@ public class EvaluationTest {
     final BaseVector out = evaluator.eval(sv, input);
     final String outString = out.toString();
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("eval-output/field-access-1.txt"), outString);
+        ResourceTests.readResourceAsString("eval-output/field-access-1.arrow"), outString);
   }
 
   @Test
@@ -73,7 +73,7 @@ public class EvaluationTest {
             Config.empty(),
             ConnectorConfig.empty());
     final Evaluator evaluator = session.evaluationOps().createEvaluator(expr);
-    final String expected = ResourceTests.readResourceAsString("eval-output/field-access-1.txt");
+    final String expected = ResourceTests.readResourceAsString("eval-output/field-access-1.arrow");
     for (int i = 0; i < 10; i++) {
       final BaseVector out = evaluator.eval(sv, input);
       final String outString = out.toString();
@@ -100,6 +100,6 @@ public class EvaluationTest {
     final BaseVector out = evaluator.eval(sv, input);
     final String outString = out.toString();
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("eval-output/multiply-1.txt"), outString);
+        ResourceTests.readResourceAsString("eval-output/multiply-1.arrow"), outString);
   }
 }

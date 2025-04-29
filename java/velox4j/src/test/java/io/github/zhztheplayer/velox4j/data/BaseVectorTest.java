@@ -62,7 +62,7 @@ public class BaseVectorTest {
   public void testToString() {
     final RowVector input = BaseVectorTests.newSampleRowVector(session);
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("vector-output/to-string-1.txt"), input.toString());
+        ResourceTests.readResourceAsString("vector-output/to-string-1.tsv"), input.toString());
   }
 
   @Test
@@ -72,9 +72,9 @@ public class BaseVectorTest {
     final RowVector sliced1 = input.slice(0, 2).asRowVector();
     final RowVector sliced2 = input.slice(2, 1).asRowVector();
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("vector-output/slice-1.txt"), sliced1.toString());
+        ResourceTests.readResourceAsString("vector-output/slice-1.tsv"), sliced1.toString());
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("vector-output/slice-2.txt"), sliced2.toString());
+        ResourceTests.readResourceAsString("vector-output/slice-2.tsv"), sliced2.toString());
   }
 
   @Test
@@ -87,11 +87,11 @@ public class BaseVectorTest {
     Assert.assertEquals(6, input1.getSize());
     Assert.assertEquals(3, input2.getSize());
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("vector-output/append-1.txt"), input1.toString());
+        ResourceTests.readResourceAsString("vector-output/append-1.tsv"), input1.toString());
     input2.append(input1);
     Assert.assertEquals(6, input1.getSize());
     Assert.assertEquals(9, input2.getSize());
     Assert.assertEquals(
-        ResourceTests.readResourceAsString("vector-output/append-2.txt"), input2.toString());
+        ResourceTests.readResourceAsString("vector-output/append-2.tsv"), input2.toString());
   }
 }
