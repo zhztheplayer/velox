@@ -189,6 +189,23 @@ void setLazyField(
   }
 }
 
+bool isChildMissingFromFileType(const velox::common::ScanSpec& childSpec,
+  const std::shared_ptr<const dwio::common::TypeWithId>& fileType) {
+  switch (fileType->type()->kind()) {
+    case TypeKind::MAP:
+      // If this is the case it means this is a flat map,
+      // so it can't have "missing" fields.
+      return false;
+    case TypeKind::ROW:
+      // The file is in row type, check if the field name is missing from
+      // the child types.
+      return !asRowType(fileType->type())->containsChild(childSpec.fieldName());
+    default:
+      // Otherwise, consider the field is missing if the child channel exceeds
+      // the file type size.
+      return childSpec.channel() >= fileType->size();
+  }
+}
 } // namespace
 
 void SelectiveStructColumnReaderBase::filterRowGroups(
@@ -517,7 +534,7 @@ bool SelectiveStructColumnReaderBase::isChildMissing(
   return
       // The below check is trying to determine if this is a missing field in a
       // struct that should be constant null.
-      (!isRoot_ && // If we're in the root struct channel is meaningless in this
+      !isRoot_ && // If we're in the root struct channel is meaningless in this
                    // context and it will be a null constant anyway if it's
                    // missing.
        childSpec.channel() !=
@@ -525,10 +542,7 @@ bool SelectiveStructColumnReaderBase::isChildMissing(
                                                   // a filter on a subfield of a
                                                   // row type that doesn't exist
                                                   // in the output.
-       fileType_->type()->kind() !=
-           TypeKind::MAP && // If this is the case it means this is a flat map,
-                            // so it can't have "missing" fields.
-       childSpec.channel() >= fileType_->size());
+       isChildMissingFromFileType(childSpec, fileType_);
 }
 
 void SelectiveStructColumnReaderBase::getValues(
