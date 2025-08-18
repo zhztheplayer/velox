@@ -573,7 +573,8 @@ TEST_F(TableScanTest, subfieldPruningRowTypeSubscriptReachesChildrenSize) {
   auto dataColumnType = ROW({"b", "d"}, {BIGINT(), DOUBLE()});
   auto dataRowType = ROW({"e"}, {dataColumnType});
 
-  auto requestedColumnType = ROW({"b", "c", "d"}, {BIGINT(), BIGINT(), DOUBLE()});
+  auto requestedColumnType =
+      ROW({"b", "c", "d"}, {BIGINT(), BIGINT(), DOUBLE()});
   auto requestedRowType = ROW({"e"}, {requestedColumnType});
 
   auto vectors = makeVectors(10, 1'000, dataRowType);
