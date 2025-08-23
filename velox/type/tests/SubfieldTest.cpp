@@ -46,28 +46,35 @@ TEST(SubfieldTest, invalidPaths) {
   assertInvalidSubfield("a[2", "Invalid subfield path: a[2^");
   assertInvalidSubfield("a.*", "Invalid subfield path: a.^*");
   assertInvalidSubfield("a[2].[3].", "Invalid subfield path: a[2].^[3].");
+  assertInvalidSubfield("`a", "Invalid subfield path: `a^");
 }
 
 void testColumnName(
-    const std::string& name,
+    const std::string& path,
+    const std::string& expectedName,
     std::shared_ptr<const Separators> separators = Separators::get()) {
-  auto elements = tokenize(name, std::move(separators));
+  auto elements = tokenize(path, std::move(separators));
   EXPECT_EQ(elements.size(), 1);
-  EXPECT_EQ(*elements[0].get(), Subfield::NestedField(name));
+  EXPECT_EQ(*elements[0].get(), Subfield::NestedField(expectedName));
 }
 
 TEST(SubfieldTest, columnNamesWithSpecialCharacters) {
-  testColumnName("two words");
-  testColumnName("two  words");
-  testColumnName("one two three");
-  testColumnName("$bucket");
-  testColumnName("apollo-11");
-  testColumnName("a/b/c:12");
-  testColumnName("@basis");
-  testColumnName("@basis|city_id");
+  testColumnName("two words", "two words");
+  testColumnName("two  words", "two  words");
+  testColumnName("one two three", "one two three");
+  testColumnName("$bucket", "$bucket");
+  testColumnName("apollo-11", "apollo-11");
+  testColumnName("a/b/c:12", "a/b/c:12");
+  testColumnName("@basis", "@basis");
+  testColumnName("@basis|city_id", "@basis|city_id");
+  testColumnName("`a.b`", "a.b");
+  testColumnName("`a.``b`", "a.`b");
   auto separators = std::make_shared<Separators>();
   separators->dot = '\0';
-  testColumnName("city.id@address:number/date|day$a-b$10_bucket", separators);
+  testColumnName(
+      "city.id@address:number/date|day$a-b$10_bucket",
+      "city.id@address:number/date|day$a-b$10_bucket",
+      separators);
 }
 
 std::vector<std::unique_ptr<Subfield::PathElement>> createElements() {
@@ -135,6 +142,11 @@ TEST(SubfieldTest, prefix) {
   EXPECT_TRUE(Subfield("a.b").isPrefix(Subfield("a.b[\"d\"]")));
   EXPECT_FALSE(Subfield("a.c").isPrefix(Subfield("a.b.c")));
   EXPECT_FALSE(Subfield("a.b.c").isPrefix(Subfield("a.b")));
+  EXPECT_TRUE(Subfield("`a.b`").isPrefix(Subfield("`a.b`.c")));
+  EXPECT_TRUE(Subfield("`a`").isPrefix(Subfield("a.b.c")));
+  EXPECT_TRUE(Subfield("a").isPrefix(Subfield("`a`.b.c")));
+  EXPECT_FALSE(Subfield("`a.b`").isPrefix(Subfield("a.b.c")));
+  EXPECT_FALSE(Subfield("a.b").isPrefix(Subfield("`a.b`.c")));
 }
 
 TEST(SubfieldTest, hash) {

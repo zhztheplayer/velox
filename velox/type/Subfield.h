@@ -40,7 +40,7 @@ struct Separators {
 
   bool isSeparator(char c) const {
     return c == closeBracket || c == dot || c == openBracket || c == quote ||
-        c == wildCard;
+        c == wildCard || c == backtick;
   }
 
   char backSlash = '\\';
@@ -50,6 +50,7 @@ struct Separators {
   char quote = '\"';
   char wildCard = '*';
   char unicodeCaret = '^';
+  char backtick = '`';
 };
 
 class Subfield {
@@ -121,7 +122,11 @@ class Subfield {
     }
 
     std::string toString() const override {
-      return "." + name_;
+      if (name_.find('.') == std::string::npos &&
+          name_.find('\'') == std::string::npos) {
+        return "." + name_;
+      }
+      return ".`" + boost::replace_all_copy(name_, "`", "``") + "`";
     }
 
     bool isSubscript() const override {

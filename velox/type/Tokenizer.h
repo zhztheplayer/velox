@@ -68,6 +68,8 @@ class Tokenizer {
 
   std::unique_ptr<Subfield::PathElement> matchPathSegment();
 
+  std::unique_ptr<Subfield::PathElement> matchBacktickedPathSegment();
+
   std::unique_ptr<Subfield::PathElement> matchUnquotedSubscript();
 
   std::unique_ptr<Subfield::PathElement> matchQuotedSubscript();

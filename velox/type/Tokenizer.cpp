@@ -75,7 +75,9 @@ std::unique_ptr<Subfield::PathElement> Tokenizer::computeNext() {
   }
 
   if (firstSegment_) {
-    auto token = matchPathSegment();
+    auto token = tryMatchSeparator(separators_->backtick)
+        ? matchBacktickedPathSegment()
+        : matchPathSegment();
     firstSegment_ = false;
     return token;
   }
@@ -121,6 +123,54 @@ std::unique_ptr<Subfield::PathElement> Tokenizer::matchPathSegment() {
   std::string token = path_.substr(start, end - start);
 
   // an empty unquoted token is not allowed
+  if (token.empty()) {
+    invalidSubfieldPath();
+  }
+
+  return std::make_unique<Subfield::NestedField>(token);
+}
+
+std::unique_ptr<Subfield::PathElement> Tokenizer::matchBacktickedPathSegment() {
+  // Backticked path segment allows dot in the segment, e.g., `a.b`.
+  // To escape a backtick in the path segment, using tow consecutive backticks,
+  // e.g., `a.``b```.
+  std::string token;
+
+  bool backtickSeen = false;
+  while (hasNextCharacter()) {
+    const auto peek = peekCharacter();
+    if (peek == separators_->backtick) {
+      // We see a backtick. It could mean one of the following cases:
+      // 1. Tow consecutive backticks: "``", which means an escaped backtick as
+      // part of the path segment.
+      // 2. One single back "`" indicating the end of the backticked path
+      // segment.
+      if (backtickSeen) {
+        // Add a backtick to the path segment.
+        token += separators_->backtick;
+      }
+      backtickSeen = !backtickSeen;
+      // Always consumes the backtick.
+      nextCharacter();
+      continue;
+    }
+    if (backtickSeen) {
+      // End of the backticked path segment.
+      break;
+    }
+    if (!isUnquotedPathCharacter(peek) && peek != separators_->dot) {
+      break;
+    }
+    token += peek;
+    nextCharacter();
+  }
+
+  // The backtick must be enclosed.
+  if (!backtickSeen) {
+    invalidSubfieldPath();
+  }
+
+  // An empty token is not allowed.
   if (token.empty()) {
     invalidSubfieldPath();
   }
