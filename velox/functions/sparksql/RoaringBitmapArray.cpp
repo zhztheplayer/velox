@@ -122,9 +122,17 @@ bool RoaringBitmapArray::contains(int64_t value) {
   if (high >= bitmaps_.size()) {
     return false;
   }
+  if (FOLLY_LIKELY(high == lastHighBytes_)) {
+    // Fast path for ordered input.
+    const auto low = lowBytes(value);
+    return lastBitmap_->containsBulk(*lastContext_, low);
+  }
   const auto highBitmap = bitmaps_[high];
   const auto highBuckContext = buckContexts_[high];
   const auto low = lowBytes(value);
+  lastHighBytes_ = high;
+  lastBitmap_ = highBitmap.get();
+  lastContext_ = highBuckContext.get();
   return highBitmap->containsBulk(*highBuckContext, low);
 }
 
