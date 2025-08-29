@@ -63,6 +63,7 @@ add_executable(
   RandTest.cpp
   ReadSidePaddingFunctionTest.cpp
   RegexFunctionsTest.cpp
+  RoaringBitmapArrayTest.cpp
   SliceTest.cpp
   SizeTest.cpp
   SortArrayTest.cpp

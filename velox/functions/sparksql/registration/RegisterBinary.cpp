@@ -17,6 +17,7 @@
 #include "velox/functions/prestosql/BinaryFunctions.h"
 #include "velox/functions/sparksql/Hash.h"
 #include "velox/functions/sparksql/MightContain.h"
+#include "velox/functions/sparksql/RoaringBitmapArray.h"
 #include "velox/functions/sparksql/String.h"
 
 namespace facebook::velox::functions::sparksql {
@@ -44,6 +45,8 @@ void registerBinaryFunctions(const std::string& prefix) {
       {prefix + "sha1"});
   registerFunction<Sha2HexStringFunction, Varchar, Varbinary, int32_t>(
       {prefix + "sha2"});
+  registerFunction<RoaringBitmapArrayContains, bool, Varbinary, int64_t>(
+      {prefix + "roaring_bitmap_array_contains"});
 }
 
 } // namespace facebook::velox::functions::sparksql
