@@ -28,6 +28,7 @@ const int64_t kMaxRepresentableValue =
 
 void RoaringBitmapArray::deserialize(const char* serialized) {
   bitmaps_.clear();
+  buckContexts_.clear();
   common::InputByteStream stream(serialized);
   const auto magicNumber = stream.read<int32_t>();
   switch (magicNumber) {
@@ -48,6 +49,7 @@ void RoaringBitmapArray::deserialize(const char* serialized) {
       // bound.
       const auto minimumArraySize = static_cast<int32_t>(numberOfBitmaps);
       bitmaps_.reserve(minimumArraySize);
+      buckContexts_.reserve(minimumArraySize);
       int32_t lastIndex = 0;
       for (int32_t i = 0; i < numberOfBitmaps; ++i) {
         const auto key = stream.read<int32_t>();
@@ -60,6 +62,7 @@ void RoaringBitmapArray::deserialize(const char* serialized) {
         // Fill gaps in sparse data.
         while (lastIndex < key) {
           bitmaps_.emplace_back(std::make_shared<roaring::Roaring>());
+          buckContexts_.emplace_back(std::make_shared<roaring::BulkContext>());
           ++lastIndex;
         }
         roaring::api::roaring_bitmap_t* r =
@@ -67,6 +70,7 @@ void RoaringBitmapArray::deserialize(const char* serialized) {
                 serialized + stream.offset());
         VELOX_CHECK_NOT_NULL(r);
         bitmaps_.emplace_back(std::make_shared<roaring::Roaring>(r));
+        buckContexts_.emplace_back(std::make_shared<roaring::BulkContext>());
         ++lastIndex;
         // Advances the stream for N bytes which is the serialized size of the
         // previous read bitmap.
@@ -105,6 +109,7 @@ void RoaringBitmapArray::add(int64_t value) {
     // Grows the bitmap array.
     for (int32_t i = bitmaps_.size(); i <= high; ++i) {
       bitmaps_.emplace_back(std::make_shared<roaring::Roaring>());
+      buckContexts_.emplace_back(std::make_shared<roaring::BulkContext>());
     }
   }
   auto bitmap = bitmaps_[high];
@@ -118,8 +123,9 @@ bool RoaringBitmapArray::contains(int64_t value) {
     return false;
   }
   const auto highBitmap = bitmaps_[high];
+  const auto highBuckContext = buckContexts_[high];
   const auto low = lowBytes(value);
-  return highBitmap->contains(low);
+  return highBitmap->containsBulk(*highBuckContext, low);
 }
 
 int64_t RoaringBitmapArray::serializedSizeInBytes() {

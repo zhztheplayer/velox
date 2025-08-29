@@ -52,6 +52,7 @@ class RoaringBitmapArray {
 
   static constexpr int32_t kPortableSerializationFormatMagicNumber = 1681511377;
   std::vector<std::shared_ptr<roaring::Roaring>> bitmaps_;
+  std::vector<std::shared_ptr<roaring::BulkContext>> buckContexts_;
 };
 
 template <typename T>
