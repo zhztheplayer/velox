@@ -27,6 +27,7 @@ const int64_t kMaxRepresentableValue =
 }
 
 void RoaringBitmapArray::deserialize(const char* serialized) {
+  bitmaps_.clear();
   common::InputByteStream stream(serialized);
   const auto magicNumber = stream.read<int32_t>();
   switch (magicNumber) {
@@ -42,7 +43,7 @@ void RoaringBitmapArray::deserialize(const char* serialized) {
           std::numeric_limits<int32_t>::max(),
           "Invalid RoaringBitmapArray length ({} > {})",
           numberOfBitmaps,
-          std::numeric_limits<int64_t>::max());
+          std::numeric_limits<int32_t>::max());
       // The sparse bitmap array format uses the number as an array size lower
       // bound.
       const auto minimumArraySize = static_cast<int32_t>(numberOfBitmaps);
