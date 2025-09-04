@@ -22,7 +22,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace facebook::velox::functions::sparksql {
+namespace facebook::velox::functions::delta {
 
 namespace {
 int64_t composeFromHighLowBytes(int32_t high, int32_t low) {

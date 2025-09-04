@@ -14,41 +14,85 @@
  * limitations under the License.
  */
 
+#include <functions/Registerer.h>
 #include <functions/delta/RoaringBitmapArray.h>
 
+#include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
 #include "velox/core/Expressions.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
-namespace facebook::velox::functions::sparksql::test {
+namespace facebook::velox::functions::delta::test {
+
 namespace {
 
-class RoaringBitmapArrayTest : public ::testing::Test {};
+class RoaringBitmapArrayTest : public functions::test::FunctionBaseTest {
+  protected:
+    static void SetUpTestCase() {
+    registerFunction<RoaringBitmapArrayContains, bool, Varbinary, int64_t>(
+        {"bitmap_array_contains"});
+    }
+
+  void testBitmapContain(
+      const std::string& serialized,
+      const VectorPtr& value,
+      const VectorPtr& expected) {
+      std::vector<core::TypedExprPtr> args;
+      args.push_back(std::make_shared<core::ConstantTypedExpr>(
+          VARBINARY(), variant::binary(serialized)));
+      args.push_back(
+            std::make_shared<core::FieldAccessTypedExpr>(BIGINT(), "c0"));
+      auto expr = exec::ExprSet(
+        {std::make_shared<core::CallTypedExpr>(
+            BOOLEAN(), args, "bitmap_array_contains")},
+        &execCtx_);
+    auto data = makeRowVector({value});
+    exec::EvalCtx evalCtx(&execCtx_, &expr, data.get());
+    std::vector<VectorPtr> results(1);
+    auto allSelected = SelectivityVector(value->size());
+    expr.eval(allSelected, evalCtx, results);
+    velox::test::assertEqualVectors(expected, results[0]);
+    }
+};
 
 TEST_F(RoaringBitmapArrayTest, contains) {
   RoaringBitmapArray array{};
-  array.add(206L);
-  array.add(10L << 32 | 10L);
-  EXPECT_TRUE(array.contains(206L));
-  EXPECT_FALSE(array.contains(207L));
-  EXPECT_TRUE(array.contains(10L << 32 | 10));
-  EXPECT_FALSE(array.contains(11L << 32 | 10));
-  EXPECT_FALSE(array.contains(10L << 32 | 11));
+  array.add(206LL);
+  array.add(10LL << 32 | 10LL);
+  EXPECT_TRUE(array.contains(206LL));
+  EXPECT_FALSE(array.contains(207LL));
+  EXPECT_TRUE(array.contains(10LL << 32 | 10LL));
+  EXPECT_FALSE(array.contains(11LL << 32 | 10LL));
+  EXPECT_FALSE(array.contains(10LL << 32 | 11LL));
 }
 
 TEST_F(RoaringBitmapArrayTest, serde) {
   RoaringBitmapArray array{};
-  array.add(206L);
-  array.add(10L << 32 | 10L);
+  array.add(206LL);
+  array.add(10LL << 32 | 10LL);
   std::string data;
   data.resize(array.serializedSizeInBytes());
   array.serialize(data.data());
   RoaringBitmapArray deserialized{};
   deserialized.deserialize(data.data());
-  EXPECT_TRUE(deserialized.contains(206L));
-  EXPECT_FALSE(deserialized.contains(207L));
-  EXPECT_TRUE(deserialized.contains(10L << 32 | 10));
-  EXPECT_FALSE(deserialized.contains(11L << 32 | 10));
-  EXPECT_FALSE(deserialized.contains(10L << 32 | 11));
+  EXPECT_TRUE(deserialized.contains(206LL));
+  EXPECT_FALSE(deserialized.contains(207LL));
+  EXPECT_TRUE(deserialized.contains(10LL << 32 | 10LL));
+  EXPECT_FALSE(deserialized.contains(11LL << 32 | 10LL));
+  EXPECT_FALSE(deserialized.contains(10LL << 32 | 11LL));
+}
+
+TEST_F(RoaringBitmapArrayTest, bitmapContainsFunction) {
+  RoaringBitmapArray array{};
+  array.add(206LL);
+  array.add(10LL << 32 | 10LL);
+  std::string data;
+  data.resize(array.serializedSizeInBytes());
+  array.serialize(data.data());
+  auto value =
+      makeFlatVector<int64_t>(std::vector<int64_t>{0, 206LL, 207LL, 10LL << 32 | 10LL, 11LL << 32 | 10LL, 10LL << 32 | 11LL});
+  auto expected =
+    makeFlatVector<bool>(std::vector<bool>{false, true, false, true, false, false});
+  testBitmapContain(data, expected, value);
 }
 
 } // namespace

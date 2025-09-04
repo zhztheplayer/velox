@@ -21,7 +21,7 @@
 #include <functions/Macros.h>
 #include <roaring.hh>
 
-namespace facebook::velox::functions::sparksql {
+namespace facebook::velox::functions::delta {
 
 class RoaringBitmapArray {
  public:
