@@ -16,9 +16,8 @@
 
 #pragma once
 
-#include "common/base/Exceptions.h"
-
 #include <core/QueryConfig.h>
+#include <folly/CPortability.h>
 #include <functions/Macros.h>
 #include <roaring.hh>
 
@@ -26,33 +25,34 @@ namespace facebook::velox::functions::sparksql {
 
 class RoaringBitmapArray {
  public:
-  RoaringBitmapArray() : bitmaps_({}) {}
+  RoaringBitmapArray() = default;
 
   void deserialize(const char* serialized);
 
-  void serialize(char* buf);
+  void serialize(char* buf) const;
 
   void add(int64_t value);
 
   bool contains(int64_t value);
 
-  int64_t serializedSizeInBytes();
-
-  // Composes a pair (high, low).
-  static int64_t composeFromHighLowBytes(int32_t high, int32_t low);
+  int64_t serializedSizeInBytes() const;
 
  private:
   static void checkValue(int64_t value);
 
-  // Extracts the high 32 bits.
-  static int32_t highBytes(int64_t value);
+  // Extracts the high 32 bits. The function doesn't check
+  // the input value internally. Call `checkValue` first
+  // before calling the function.
+  static int32_t highBytesUnsafe(int64_t value);
 
-  // Extracts the low 32 bits.
-  static int32_t lowBytes(int64_t value);
+  // Extracts the low 32 bits. The function doesn't check
+  // the input value internally. Call `checkValue` first
+  // before calling the function.
+  static int32_t lowBytesUnsafe(int64_t value);
 
-  static constexpr int32_t kPortableSerializationFormatMagicNumber = 1681511377;
-  std::vector<std::shared_ptr<roaring::Roaring>> bitmaps_;
-  std::vector<std::shared_ptr<roaring::BulkContext>> buckContexts_;
+  static constexpr int32_t kPortableSerializationFormatMagicNumber{1681511377};
+  std::vector<std::shared_ptr<roaring::Roaring>> bitmaps_{};
+  std::vector<std::shared_ptr<roaring::BulkContext>> buckContexts_{};
   int32_t lastHighBytes_{-1};
   roaring::Roaring* lastBitmap_{nullptr};
   roaring::BulkContext* lastContext_{nullptr};

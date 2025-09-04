@@ -15,16 +15,27 @@
  */
 
 #include "velox/functions/sparksql/RoaringBitmapArray.h"
-#include "common/base/IOUtils.h"
+#include "velox/common/base/IOUtils.h"
+
+#include <common/base/Exceptions.h>
+#include <folly/Likely.h>
+#include <cstdint>
+#include <limits>
 
 namespace facebook::velox::functions::sparksql {
 
 namespace {
-const int64_t kMaxRepresentableValue =
-    RoaringBitmapArray::composeFromHighLowBytes(
-        std::numeric_limits<int32_t>::max() - 1,
-        std::numeric_limits<int32_t>::max());
+int64_t composeFromHighLowBytes(int32_t high, int32_t low) {
+  VELOX_CHECK_GE(high, 0);
+  VELOX_CHECK_GE(low, 0);
+  return static_cast<int64_t>(high) << 32 |
+      (static_cast<int64_t>(low) & 0xFFFFFFFFLL);
 }
+
+const int64_t kMaxRepresentableValue = composeFromHighLowBytes(
+    std::numeric_limits<int32_t>::max() - 1,
+    std::numeric_limits<int32_t>::max());
+} // namespace
 
 void RoaringBitmapArray::deserialize(const char* serialized) {
   bitmaps_.clear();
@@ -87,7 +98,7 @@ void RoaringBitmapArray::deserialize(const char* serialized) {
   }
 }
 
-void RoaringBitmapArray::serialize(char* buf) {
+void RoaringBitmapArray::serialize(char* buf) const {
   common::OutputByteStream stream(buf);
   stream.appendOne<int32_t>(kPortableSerializationFormatMagicNumber);
   stream.appendOne<int64_t>(bitmaps_.size());
@@ -103,8 +114,8 @@ void RoaringBitmapArray::serialize(char* buf) {
 
 void RoaringBitmapArray::add(int64_t value) {
   checkValue(value);
-  const auto high = highBytes(value);
-  const auto low = lowBytes(value);
+  const auto high = highBytesUnsafe(value);
+  const auto low = lowBytesUnsafe(value);
   if (high >= bitmaps_.size()) {
     // Grows the bitmap array.
     for (int32_t i = bitmaps_.size(); i <= high; ++i) {
@@ -118,25 +129,25 @@ void RoaringBitmapArray::add(int64_t value) {
 
 bool RoaringBitmapArray::contains(int64_t value) {
   checkValue(value);
-  const auto high = highBytes(value);
+  const auto high = highBytesUnsafe(value);
   if (high >= bitmaps_.size()) {
     return false;
   }
   if (FOLLY_LIKELY(high == lastHighBytes_)) {
     // Fast path for ordered input.
-    const auto low = lowBytes(value);
+    const auto low = lowBytesUnsafe(value);
     return lastBitmap_->containsBulk(*lastContext_, low);
   }
   const auto highBitmap = bitmaps_[high];
   const auto highBuckContext = buckContexts_[high];
-  const auto low = lowBytes(value);
+  const auto low = lowBytesUnsafe(value);
   lastHighBytes_ = high;
   lastBitmap_ = highBitmap.get();
   lastContext_ = highBuckContext.get();
   return highBitmap->containsBulk(*highBuckContext, low);
 }
 
-int64_t RoaringBitmapArray::serializedSizeInBytes() {
+int64_t RoaringBitmapArray::serializedSizeInBytes() const {
   const int64_t magicNumberSize = 4L;
   const int64_t bitmapCountSize = 8L;
   const int64_t individualBitmapKeySize = 4L;
@@ -163,16 +174,11 @@ void RoaringBitmapArray::checkValue(int64_t value) {
       kMaxRepresentableValue);
 }
 
-int32_t RoaringBitmapArray::highBytes(int64_t value) {
+int32_t RoaringBitmapArray::highBytesUnsafe(int64_t value) {
   return static_cast<int32_t>(value >> 32);
 }
 
-int32_t RoaringBitmapArray::lowBytes(int64_t value) {
+int32_t RoaringBitmapArray::lowBytesUnsafe(int64_t value) {
   return static_cast<int32_t>(value & 0xFFFFFFFFLL);
-}
-
-int64_t RoaringBitmapArray::composeFromHighLowBytes(int32_t high, int32_t low) {
-  return static_cast<int64_t>(high) << 32 |
-      (static_cast<int64_t>(low) & 0xFFFFFFFFLL);
 }
 } // namespace facebook::velox::functions::sparksql
