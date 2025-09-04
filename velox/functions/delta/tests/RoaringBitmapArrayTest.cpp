@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include <functions/sparksql/RoaringBitmapArray.h>
+#include <functions/delta/RoaringBitmapArray.h>
 
 #include "velox/core/Expressions.h"
-#include "velox/functions/sparksql/tests/SparkFunctionBaseTest.h"
+#include "velox/vector/tests/utils/VectorTestBase.h"
 
 namespace facebook::velox::functions::sparksql::test {
 namespace {

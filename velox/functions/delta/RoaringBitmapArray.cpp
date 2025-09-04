@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/functions/sparksql/RoaringBitmapArray.h"
+#include "velox/functions/delta/RoaringBitmapArray.h"
 #include "velox/common/base/IOUtils.h"
 
 #include <common/base/Exceptions.h>

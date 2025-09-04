@@ -29,7 +29,6 @@ velox_add_library(
   MakeTimestamp.cpp
   Map.cpp
   RegexFunctions.cpp
-  RoaringBitmapArray.cpp
   Size.cpp
   String.cpp
   UnscaledValueFunction.cpp
@@ -43,7 +42,6 @@ velox_link_libraries(
   velox_functions_util
   Folly::folly
   simdjson::simdjson
-  roaring
 )
 
 if(NOT VELOX_MONO_LIBRARY)

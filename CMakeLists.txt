@@ -717,7 +717,9 @@ if(VELOX_ENABLE_GEO)
   velox_resolve_dependency(geos)
 endif()
 
-velox_set_source(roaring)
-velox_resolve_dependency(roaring)
+if(VELOX_ENABLE_DELTA_FUNCTIONS)
+  velox_set_source(roaring)
+  velox_resolve_dependency(roaring)
+endif()
 
 add_subdirectory(velox)
