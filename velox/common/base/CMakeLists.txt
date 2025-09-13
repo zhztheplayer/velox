@@ -27,6 +27,7 @@ velox_add_library(
   PeriodicStatsReporter.cpp
   RandomUtil.cpp
   RuntimeMetrics.cpp
+  RoaringBitmapArray.cpp
   SimdUtil.cpp
   SkewedPartitionBalancer.cpp
   SpillConfig.cpp
@@ -38,7 +39,7 @@ velox_add_library(
 
 velox_link_libraries(
   velox_common_base
-  PUBLIC velox_exception Folly::folly fmt::fmt xsimd
+  PUBLIC velox_exception Folly::folly fmt::fmt xsimd Roaring::roaring
   PRIVATE velox_caching velox_common_compression velox_process velox_test_util glog::glog
 )
 

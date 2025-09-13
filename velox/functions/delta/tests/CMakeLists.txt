@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_executable(velox_functions_delta_test RoaringBitmapArrayTest.cpp)
+add_executable(velox_functions_delta_test RoaringBitmapArrayContainsTest.cpp)
 
 add_test(
   NAME velox_functions_delta_test

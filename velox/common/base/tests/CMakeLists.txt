@@ -25,6 +25,7 @@ add_executable(
   IndexedPriorityQueueTest.cpp
   LazyCPUThreadPoolExecutorTest.cpp
   RangeTest.cpp
+  RoaringBitmapArrayTest.cpp
   RuntimeMetricsTest.cpp
   ScopedLockTest.cpp
   SemaphoreTest.cpp

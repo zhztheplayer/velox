@@ -14,15 +14,14 @@
  * limitations under the License.
  */
 
-#include "velox/functions/delta/RoaringBitmapArray.h"
+#include "velox/common/base/RoaringBitmapArray.h"
+
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/base/IOUtils.h"
 
 #include <folly/Likely.h>
 #include <cstdint>
 #include <limits>
-
-namespace facebook::velox::functions::delta {
 
 namespace {
 int64_t composeFromHighLowBytes(int32_t high, int32_t low) {
@@ -36,6 +35,8 @@ const int64_t kMaxRepresentableValue = composeFromHighLowBytes(
     std::numeric_limits<int32_t>::max() - 1,
     std::numeric_limits<int32_t>::max());
 } // namespace
+
+namespace facebook::velox::common {
 
 void RoaringBitmapArray::deserialize(const char* serialized) {
   bitmaps_.clear();
@@ -181,4 +182,4 @@ int32_t RoaringBitmapArray::highBytesUnsafe(int64_t value) {
 int32_t RoaringBitmapArray::lowBytesUnsafe(int64_t value) {
   return static_cast<int32_t>(value & 0xFFFFFFFFLL);
 }
-} // namespace facebook::velox::functions::delta
+} // namespace facebook::velox::common
