@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/functions/delta/RoaringBitmapArray.h"
+#include "velox/functions/delta/RoaringBitmapArrayContains.h"
 #include "velox/core/Expressions.h"
 #include "velox/functions/Registerer.h"
 #include "velox/functions/prestosql/tests/utils/FunctionBaseTest.h"
@@ -24,7 +24,8 @@ namespace facebook::velox::functions::delta::test {
 
 namespace {
 
-class RoaringBitmapArrayTest : public functions::test::FunctionBaseTest {
+class RoaringBitmapArrayContainsTest
+    : public functions::test::FunctionBaseTest {
  protected:
   static void SetUpTestCase() {
     memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
@@ -54,35 +55,8 @@ class RoaringBitmapArrayTest : public functions::test::FunctionBaseTest {
   }
 };
 
-TEST_F(RoaringBitmapArrayTest, contains) {
-  RoaringBitmapArray array{};
-  array.add(206LL);
-  array.add(10LL << 32 | 10LL);
-  EXPECT_TRUE(array.contains(206LL));
-  EXPECT_FALSE(array.contains(207LL));
-  EXPECT_TRUE(array.contains(10LL << 32 | 10LL));
-  EXPECT_FALSE(array.contains(11LL << 32 | 10LL));
-  EXPECT_FALSE(array.contains(10LL << 32 | 11LL));
-}
-
-TEST_F(RoaringBitmapArrayTest, serde) {
-  RoaringBitmapArray array{};
-  array.add(206LL);
-  array.add(10LL << 32 | 10LL);
-  std::string data;
-  data.resize(array.serializedSizeInBytes());
-  array.serialize(data.data());
-  RoaringBitmapArray deserialized{};
-  deserialized.deserialize(data.data());
-  EXPECT_TRUE(deserialized.contains(206LL));
-  EXPECT_FALSE(deserialized.contains(207LL));
-  EXPECT_TRUE(deserialized.contains(10LL << 32 | 10LL));
-  EXPECT_FALSE(deserialized.contains(11LL << 32 | 10LL));
-  EXPECT_FALSE(deserialized.contains(10LL << 32 | 11LL));
-}
-
-TEST_F(RoaringBitmapArrayTest, bitmapContainsFunction) {
-  RoaringBitmapArray array{};
+TEST_F(RoaringBitmapArrayContainsTest, bitmapContainsFunction) {
+  common::RoaringBitmapArray array{};
   array.add(206LL);
   array.add(10LL << 32 | 10LL);
   std::string data;

@@ -16,13 +16,10 @@
 
 #pragma once
 
-#include "velox/core/QueryConfig.h"
-#include "velox/functions/Macros.h"
-
-#include <folly/CPortability.h>
+#include <memory>
 #include <roaring/roaring.hh>
 
-namespace facebook::velox::functions::delta {
+namespace facebook::velox::common {
 
 /// The C++ implementation of 64-bit array-based roaring bitmap which
 /// is used by Delta Lake deletion vectors. See
@@ -62,26 +59,4 @@ class RoaringBitmapArray {
   roaring::BulkContext* lastContext_{nullptr};
 };
 
-template <typename T>
-struct RoaringBitmapArrayContains {
-  VELOX_DEFINE_FUNCTION_TYPES(T);
-
-  void initialize(
-      const std::vector<TypePtr>& /*inputTypes*/,
-      const core::QueryConfig&,
-      const arg_type<Varbinary>* serialized,
-      const arg_type<int64_t>*) {
-    if (serialized != nullptr) {
-      array_.deserialize(serialized->str().c_str());
-    }
-  }
-
-  FOLLY_ALWAYS_INLINE void
-  call(bool& result, const arg_type<Varbinary>&, const int64_t& input) {
-    result = array_.contains(input);
-  }
-
- private:
-  RoaringBitmapArray array_{};
-};
-} // namespace facebook::velox::functions::delta
+} // namespace facebook::velox::common
