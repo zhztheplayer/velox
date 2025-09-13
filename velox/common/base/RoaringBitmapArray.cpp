@@ -128,7 +128,7 @@ void RoaringBitmapArray::add(int64_t value) {
   bitmap->add(low);
 }
 
-bool RoaringBitmapArray::contains(int64_t value) {
+bool RoaringBitmapArray::contains(int64_t value) const {
   checkValue(value);
   const auto high = highBytesUnsafe(value);
   if (high >= bitmaps_.size()) {
