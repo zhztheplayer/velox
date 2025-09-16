@@ -21,6 +21,7 @@
 #include "velox/connectors/hive/HiveConnectorSplit.h"
 #include "velox/connectors/hive/HiveConnectorUtil.h"
 #include "velox/connectors/hive/TableHandle.h"
+#include "velox/connectors/hive/delta/DeltaSplitReader.h"
 #include "velox/connectors/hive/iceberg/IcebergSplitReader.h"
 #include "velox/dwio/common/ReaderFactory.h"
 
@@ -100,8 +101,10 @@ std::unique_ptr<SplitReader> SplitReader::create(
         fileHandleFactory,
         ioExecutor,
         scanSpec);
-  } else {
-    return std::unique_ptr<SplitReader>(new SplitReader(
+  }
+  if (hiveSplit->customSplitInfo.count("table_format") > 0 &&
+      hiveSplit->customSplitInfo["table_format"] == "hive-delta") {
+    return std::make_unique<delta::DeltaSplitReader>(
         hiveSplit,
         hiveTableHandle,
         partitionKeys,
@@ -112,8 +115,20 @@ std::unique_ptr<SplitReader> SplitReader::create(
         fsStats,
         fileHandleFactory,
         ioExecutor,
-        scanSpec));
+        scanSpec);
   }
+  return std::unique_ptr<SplitReader>(new SplitReader(
+      hiveSplit,
+      hiveTableHandle,
+      partitionKeys,
+      connectorQueryCtx,
+      hiveConfig,
+      readerOutputType,
+      ioStats,
+      fsStats,
+      fileHandleFactory,
+      ioExecutor,
+      scanSpec));
 }
 
 SplitReader::SplitReader(
