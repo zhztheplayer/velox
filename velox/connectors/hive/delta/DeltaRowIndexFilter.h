@@ -33,8 +33,8 @@ class DeltaRowIndexFilter {
   void materializeIntoBuffer(long start, long end, BufferPtr& data) const {
     const auto size = end - start;
     VELOX_CHECK_GE(data->capacity() * 8, size);
+    auto bits = data->asMutable<uint8_t>();
     for (auto i = 0; i < size; ++i) {
-      auto bits = data->asMutable<uint8_t>();
       bool isContained = bitmapArray_.contains(start + i);
       switch (type_) {
         case Type::kIfContained:
