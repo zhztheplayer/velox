@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include <roaring/roaring.hh>
 
 namespace facebook::velox::common {
