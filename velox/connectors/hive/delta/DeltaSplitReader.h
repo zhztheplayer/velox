@@ -48,7 +48,7 @@ class DeltaSplitReader : public SplitReader {
             fsStats,
             fileHandleFactory,
             executor,
-            scanSpec) {
+            scanSpec), deleteBitmap_(nullptr) {
     std::shared_ptr<const HiveDeltaSplit> deltaSplit =
         std::dynamic_pointer_cast<const HiveDeltaSplit>(hiveSplit_);
     VELOX_CHECK(
