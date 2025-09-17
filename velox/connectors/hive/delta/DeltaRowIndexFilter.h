@@ -35,7 +35,7 @@ class DeltaRowIndexFilter {
     VELOX_CHECK_GE(data->capacity() * 8, size);
     for (auto i = 0; i < size; ++i) {
       auto bits = data->asMutable<uint8_t>();
-      bool isContained = bitmapArray_.contains(start + 1);
+      bool isContained = bitmapArray_.contains(start + i);
       switch (type_) {
         case Type::kIfContained:
           if (isContained) {
