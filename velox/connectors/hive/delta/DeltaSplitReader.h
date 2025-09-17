@@ -71,8 +71,9 @@ class DeltaSplitReader : public SplitReader {
       mutation.randomSkip = baseReaderOpts_.randomSkip().get();
     }
     if (deltaSplit->rowIndexFilter.has_value()) {
+      const size_t numBytes = bits::nbytes(size);
       dwio::common::ensureCapacity<int8_t>(
-          deleteBitmap_, size, connectorQueryCtx_->memoryPool(), false, true);
+          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true);
       deltaSplit->rowIndexFilter->materializeIntoBuffer(
           numRowsRead_, numRowsRead_ + size, deleteBitmap_);
       mutation.deletedRows = deleteBitmap_->as<uint64_t>();

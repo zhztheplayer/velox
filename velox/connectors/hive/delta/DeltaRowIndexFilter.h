@@ -39,12 +39,12 @@ class DeltaRowIndexFilter {
       switch (type_) {
         case Type::kIfContained:
           if (isContained) {
-            bits::setBit(bits, start + i);
+            bits::setBit(bits, i);
           }
           break;
         case Type::kIfNotContained:
           if (!isContained) {
-            bits::setBit(bits, start + i);
+            bits::setBit(bits, i);
           }
           break;
         default:
