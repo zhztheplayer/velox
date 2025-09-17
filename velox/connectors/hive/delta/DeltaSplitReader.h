@@ -72,19 +72,18 @@ class DeltaSplitReader : public SplitReader {
     if (deltaSplit->rowIndexFilter.has_value()) {
       const size_t numBytes = bits::nbytes(size);
       dwio::common::ensureCapacity<int8_t>(
-          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true);
+          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true)
+      int64_t numRowsRead = baseRowReader_->nextRowNumber();
       deltaSplit->rowIndexFilter->materializeIntoBuffer(
-          numRowsRead_, numRowsRead_ + size, deleteBitmap_);
+          numRowsRead, numRowsRead + size, deleteBitmap_);
       mutation.deletedRows = deleteBitmap_->as<uint64_t>();
     }
     uint64_t numScanned = baseRowReader_->next(size, output, &mutation);
-    numRowsRead_ += numScanned;
 
     return numScanned;
   }
 
  private:
-  uint64_t numRowsRead_ = 0;
   BufferPtr deleteBitmap_;
 };
 } // namespace facebook::velox::connector::hive::delta
