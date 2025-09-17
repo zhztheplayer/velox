@@ -62,7 +62,6 @@ class DeltaSplitReader : public SplitReader {
   };
 
   uint64_t next(uint64_t size, VectorPtr& output) override {
-    uint64_t numScanned;
     std::shared_ptr<const HiveDeltaSplit> deltaSplit =
         std::dynamic_pointer_cast<const HiveDeltaSplit>(hiveSplit_);
 
@@ -78,7 +77,7 @@ class DeltaSplitReader : public SplitReader {
           numRowsRead_, numRowsRead_ + size, deleteBitmap_);
       mutation.deletedRows = deleteBitmap_->as<uint64_t>();
     }
-    numScanned = baseRowReader_->next(size, output, &mutation);
+    uint64_t numScanned = baseRowReader_->next(size, output, &mutation);
     numRowsRead_ += numScanned;
 
     return numScanned;
