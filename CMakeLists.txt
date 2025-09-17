@@ -727,7 +727,7 @@ if(VELOX_ENABLE_GEO)
   velox_resolve_dependency(geos)
 endif()
 
-velox_set_source(roaring)
-velox_resolve_dependency(roaring)
+velox_set_source(Roaring)
+velox_resolve_dependency(Roaring)
 
 add_subdirectory(velox)
