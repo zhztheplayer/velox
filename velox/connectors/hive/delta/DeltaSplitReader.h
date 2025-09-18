@@ -62,6 +62,11 @@ class DeltaSplitReader : public SplitReader {
   };
 
   uint64_t next(uint64_t size, VectorPtr& output) override {
+    const int64_t numRowsRead = baseRowReader_->nextRowNumber();
+    if (numRowsRead == dwio::common::RowReader::kAtEnd) {
+      return 0;
+    }
+
     std::shared_ptr<const HiveDeltaSplit> deltaSplit =
         std::dynamic_pointer_cast<const HiveDeltaSplit>(hiveSplit_);
 
@@ -73,13 +78,11 @@ class DeltaSplitReader : public SplitReader {
       const size_t numBytes = bits::nbytes(size);
       dwio::common::ensureCapacity<int8_t>(
           deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true);
-      int64_t numRowsRead = baseRowReader_->nextRowNumber();
       deltaSplit->rowIndexFilter->materializeIntoBuffer(
           numRowsRead, numRowsRead + size, deleteBitmap_);
       mutation.deletedRows = deleteBitmap_->as<uint64_t>();
     }
     uint64_t numScanned = baseRowReader_->next(size, output, &mutation);
-
     return numScanned;
   }
 
