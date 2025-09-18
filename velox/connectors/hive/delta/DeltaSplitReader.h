@@ -72,7 +72,7 @@ class DeltaSplitReader : public SplitReader {
     if (deltaSplit->rowIndexFilter.has_value()) {
       const size_t numBytes = bits::nbytes(size);
       dwio::common::ensureCapacity<int8_t>(
-          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true)
+          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true);
       int64_t numRowsRead = baseRowReader_->nextRowNumber();
       deltaSplit->rowIndexFilter->materializeIntoBuffer(
           numRowsRead, numRowsRead + size, deleteBitmap_);
