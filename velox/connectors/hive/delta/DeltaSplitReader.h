@@ -77,12 +77,10 @@ class DeltaSplitReader : public SplitReader {
       mutation.randomSkip = baseReaderOpts_.randomSkip().get();
     }
     if (deltaSplit->rowIndexFilter.has_value()) {
-      if (deleteBitmap_) {
-        std::memset(deleteBitmap_->asMutable<int8_t>(), 0L, deleteBitmap_->size());
-      }
       const size_t numBytes = bits::nbytes(nextReadSize);
       dwio::common::ensureCapacity<int8_t>(
-          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, true);
+          deleteBitmap_, numBytes, connectorQueryCtx_->memoryPool(), false, false);
+      std::memset(deleteBitmap_->asMutable<int8_t>(), 0L, deleteBitmap_->size());
       deltaSplit->rowIndexFilter->materializeIntoBuffer(
           numRowsRead, numRowsRead + nextReadSize, deleteBitmap_);
       mutation.deletedRows = deleteBitmap_->as<uint64_t>();
