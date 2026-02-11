@@ -16,6 +16,7 @@
 
 #include "velox/functions/sparksql/aggregates/Register.h"
 
+#include "velox/functions/sparksql/aggregates/ApproxCountDistinctForIntervalsAggregate.h"
 #include "velox/functions/sparksql/aggregates/AverageAggregate.h"
 #include "velox/functions/sparksql/aggregates/BitwiseXorAggregate.h"
 #include "velox/functions/sparksql/aggregates/BloomFilterAggAggregate.h"
@@ -53,6 +54,7 @@ void registerAggregateFunctions(
     const std::string& prefix,
     bool withCompanionFunctions,
     bool overwrite) {
+  registerApproxCountDistinctForIntervalsAggregate(prefix, withCompanionFunctions, overwrite);
   registerFirstLastAggregates(prefix, withCompanionFunctions, overwrite);
   registerMinMaxAggregates(prefix, withCompanionFunctions, overwrite);
   registerMinMaxByAggregates(prefix, withCompanionFunctions, overwrite);
