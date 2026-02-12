@@ -388,6 +388,11 @@ void HashProbe::pushdownDynamicFilters() {
           return true;
         }
         auto& hasher = *table_->hashers()[sourceChannel];
+        if (hasher.typeKind() == TypeKind::VARCHAR || hasher.typeKind() == TypeKind::VARBINARY) {
+          if (!operatorCtx_->driverCtx()->queryConfig().hashProbeStringDynamicFilterPushdownEnabled()) {
+            return false;
+          }
+        }
         filter = hasher.getFilter(false);
         if (!filter) {
           filter = hasher.getBloomFilter();
