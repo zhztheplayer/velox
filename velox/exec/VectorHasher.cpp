@@ -718,7 +718,7 @@ std::unique_ptr<common::Filter> VectorHasher::getFilter(
           }
         }
 
-        return std::make_unique<common::BytesValues>(values, nullAllowed);
+        return common::createStringValues(values, nullAllowed);
       }
       [[fallthrough]];
     default:
