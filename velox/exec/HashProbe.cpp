@@ -762,6 +762,56 @@ void HashProbe::addInput(RowVectorPtr input) {
         activeRows_.size() - activeRows_.countSelected();
   }
 
+  // Pre-filter rows using bloom filters if available.
+  // This reduces the number of rows passed to prepareForJoinProbe and
+  // joinProbe. Note: Skip for anti joins since bloom filter misses indicate
+  // non-matches, which are exactly what anti joins need to output.
+  if (activeRows_.hasSelections() && isInnerJoin(joinType_)) {
+    bool hasBloomFilters = false;
+    for (const auto& hasher : table_->hashers()) {
+      if (hasher->getBloomFilter()) {
+        hasBloomFilters = true;
+        break;
+      }
+    }
+
+    if (hasBloomFilters) {
+      auto rowCountBefore = activeRows_.countSelected();
+      for (auto i = 0; i < table_->hashers().size(); ++i) {
+        auto& keyVector = input_->childAt(hashers_[i]->channel());
+        hashers_[i]->decode(*keyVector, activeRows_);
+        auto& decoded = hashers_[i]->decodedVector();
+        // Test each row against bloom filters and deselect rows that don't
+        // pass.
+        activeRows_.applyToSelected([&](vector_size_t row) {
+          auto& hasher = table_->hashers()[i];
+          auto bloomFilter = hasher->getBloomFilter();
+          if (bloomFilter) {
+            auto* filter =
+                checkedPointerCast<const common::BigintValuesUsingBloomFilter>(
+                    bloomFilter.get());
+            int64_t value;
+            if (hasher->typeKind() == TypeKind::INTEGER) {
+              value = decoded.valueAt<int32_t>(row);
+            } else {
+              value = decoded.valueAt<int64_t>(row);
+            }
+            if (!filter->testInt64(value)) {
+              activeRows_.setValid(row, false);
+            }
+          }
+        });
+      }
+      activeRows_.updateBounds();
+      auto rowCountAfter = activeRows_.countSelected();
+      // LOG(WARNING) << "Applying bloomfilter, row count before: "
+      //              << rowCountBefore << ", row count after: " << rowCountAfter
+      //              << ", ratio: "
+      //              << static_cast<double_t>(rowCountBefore) /
+      //         static_cast<double_t>(rowCountAfter);
+    }
+  }
+
   table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
 
   if (joinIncludesMissesFromLeft(joinType_)) {
