@@ -174,6 +174,17 @@ target_link_libraries(
   Folly::follybenchmark
 )
 
+add_executable(
+  velox_row_container_extract_string_benchmark
+  RowContainerExtractStringBenchmark.cpp
+)
+
+target_link_libraries(
+  velox_row_container_extract_string_benchmark
+  velox_exec
+  Folly::follybenchmark
+)
+
 add_executable(velox_exec_bm_duplicate_project DuplicateProjectBenchmark.cpp)
 
 target_link_libraries(
