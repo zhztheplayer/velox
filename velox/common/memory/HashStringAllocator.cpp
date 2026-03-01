@@ -172,7 +172,7 @@ HashStringAllocator::Position HashStringAllocator::newWrite(
       state_.currentHeader(),
       "Do not call newWrite before finishing the previous write to "
       "HashStringAllocator");
-  state_.currentHeader() = allocate(preferredSize, false);
+  state_.currentHeader() = allocate(preferredSize, true);
 
   stream.setRange(
       ByteRange{
