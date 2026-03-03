@@ -16,39 +16,32 @@
 #pragma once
 
 #include "velox/common/base/BloomFilter.h"
-#include "velox/expression/VectorFunction.h"
-#include "velox/expression/VectorReaders.h"
+#include "velox/core/QueryConfig.h"
+#include "velox/functions/Macros.h"
 
 namespace facebook::velox::functions::sparksql {
 
-class BloomFilterMightContainFunction : public exec::VectorFunction {
- public:
-  using Allocator = std::allocator<uint64_t>;
+template <typename T>
+struct BloomFilterMightContainFunction {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  explicit BloomFilterMightContainFunction(
-      const std::vector<exec::VectorFunctionArg>& inputArgs);
+  void initialize(
+      const std::vector<TypePtr>& /*inputTypes*/,
+      const core::QueryConfig&,
+      const arg_type<Varbinary>* serialized,
+      const arg_type<int64_t>*) {
+    if (serialized != nullptr) {
+      bloomFilterView_ = std::make_unique<BloomFilterView>(serialized->data());
+    }
+  }
 
-
-  void apply(
-      const SelectivityVector& rows,
-      std::vector<VectorPtr>& args,
-      const TypePtr& outputType,
-      exec::EvalCtx& context,
-      VectorPtr& result) const override;
-
-  bool supportsFlatNoNullsFastPath() const override;
+  FOLLY_ALWAYS_INLINE void
+  call(bool& result, const arg_type<Varbinary>&, const int64_t& input) {
+    result = bloomFilterView_->mayContain(folly::hasher<int64_t>()(input));
+  }
 
  private:
-  const std::vector<exec::VectorFunctionArg>& inputArgs_;
   std::unique_ptr<BloomFilterView> bloomFilterView_;
 };
 
-std::vector<std::shared_ptr<exec::FunctionSignature>> mightContainSignatures();
-
-std::shared_ptr<exec::VectorFunction> makeMightContain(
-    const std::string& /* name */,
-    const std::vector<exec::VectorFunctionArg>& inputArgs,
-    const core::QueryConfig& /* config */);
-
-exec::VectorFunctionMetadata mightContainMetadata();
 } // namespace facebook::velox::functions::sparksql
