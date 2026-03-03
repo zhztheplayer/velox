@@ -29,6 +29,7 @@ velox_add_library(
   LeastGreatest.cpp
   MakeTimestamp.cpp
   Map.cpp
+  MightContain.cpp
   RegexFunctions.cpp
   Size.cpp
   String.cpp
