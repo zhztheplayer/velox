@@ -36,7 +36,7 @@ class BloomFilterHelper {
 
 /// BloomFilterView is a non-owning view of a serialized Bloom filter.
 /// It reads and validates the version and size from the serialized data.
-class BloomFilterView : public BloomFilterHelper {
+class BloomFilterView : BloomFilterHelper {
  public:
   /// Constructs a view from serialized Bloom filter data.
   /// Does not take ownership of the data.
@@ -70,7 +70,7 @@ class BloomFilterView : public BloomFilterHelper {
 /// if the value added or checked needs to be hashed. If this is false,
 /// we assume that the input is already a 64-bit hash number.
 template <typename Allocator = std::allocator<uint64_t>>
-class BloomFilter : public BloomFilterHelper {
+class BloomFilter : BloomFilterHelper {
  public:
   explicit BloomFilter() : bits_{Allocator()} {}
   explicit BloomFilter(const Allocator& allocator) : bits_{allocator} {}
