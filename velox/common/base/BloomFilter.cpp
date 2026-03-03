@@ -34,7 +34,7 @@ uint64_t bloomMask(uint64_t hashCode) {
 uint32_t bloomIndex(uint32_t bloomSize, uint64_t hashCode) {
   return ((hashCode >> 24) & (bloomSize - 1));
 }
-}
+} // namespace
 
 bool BloomFilterHelper::test(
     const uint64_t* bloom,
@@ -64,4 +64,3 @@ BloomFilterView::BloomFilterView(const char* serializedBloom) {
       reinterpret_cast<const uint64_t*>(serializedBloom + stream.offset());
 }
 } // namespace facebook::velox
-

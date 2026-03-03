@@ -25,7 +25,8 @@
 
 namespace facebook::velox {
 
-/// BloomFilterHelper provides static methods to test and set bits in a Bloom filter.
+/// BloomFilterHelper provides static methods to test and set bits in a Bloom
+/// filter.
 class BloomFilterHelper {
  protected:
   static bool test(const uint64_t* bloom, int32_t bloomSize, uint64_t hashCode);
@@ -143,7 +144,7 @@ class BloomFilter : public BloomFilterHelper {
     }
   }
 
-private:
+ private:
   std::vector<uint64_t, Allocator> bits_;
 };
 
