@@ -137,7 +137,7 @@ class VersionedHashCache {
   }
 
   void resize(vector_size_t size) {
-    auto oldSize = versions_.size();
+    auto oldSize = hashes_.size();
     hashes_.resize(size);
     versions_.resize(size);
     if (size > oldSize) {
@@ -155,6 +155,10 @@ class VersionedHashCache {
     } else {
       ++currentVersion_;
     }
+  }
+
+  int64_t size() const {
+    return hashes_.size();
   }
 
  private:
@@ -273,7 +277,7 @@ class VectorHasher {
 
   struct ScratchMemory {
     DecodedVector decoded;
-    raw_vector<uint64_t> hashes;
+    VersionedHashCache hashes;
   };
 
   // Updates the value id in 'result' for 'rows' in 'values'. If some value does
@@ -476,7 +480,7 @@ class VectorHasher {
   void lookupValueIdsTyped(
       const DecodedVector& decoded,
       SelectivityVector& rows,
-      raw_vector<uint64_t>& hashes,
+      VersionedHashCache& hashes,
       uint64_t* result) const;
 
   // Fast path for range mapping of int64/int32 keys.
@@ -644,7 +648,7 @@ class VectorHasher {
   const bool typeProvidesCustomComparison_;
 
   DecodedVector decoded_;
-  raw_vector<uint64_t> cachedHashes_;
+  VersionedHashCache cachedHashes_;
 
   // Single precomputed hash for constant partition keys.
   uint64_t precomputedHash_{0};

@@ -96,17 +96,19 @@ void VectorHasher::hashValues(
       !decoded_.isIdentityMapping() &&
       rows.countSelected() > decoded_.base()->size()) {
     cachedHashes_.resize(decoded_.base()->size());
-    std::fill(cachedHashes_.begin(), cachedHashes_.end(), kNullHash);
+    cachedHashes_.reset();
     rows.applyToSelected([&](vector_size_t row) {
       if (decoded_.isNullAt(row)) {
         result[row] = mix ? bits::hashMix(result[row], kNullHash) : kNullHash;
         return;
       }
       auto baseIndex = decoded_.index(row);
-      uint64_t hash = cachedHashes_[baseIndex];
-      if (hash == kNullHash) {
+      uint64_t hash;
+      if (!cachedHashes_.isSet(baseIndex)) {
         hash = hashOne<typeProvidesCustomComparison, Kind>(decoded_, row);
-        cachedHashes_[baseIndex] = hash;
+        cachedHashes_.setHash(baseIndex, hash);
+      } else {
+        hash = cachedHashes_.getHash(baseIndex);
       }
       result[row] = mix ? bits::hashMix(result[row], hash) : hash;
     });
@@ -270,7 +272,7 @@ bool VectorHasher::makeValueIdsDecoded(
   }
 
   cachedHashes_.resize(decoded_.base()->size());
-  std::fill(cachedHashes_.begin(), cachedHashes_.end(), 0);
+  cachedHashes_.reset();
 
   int numCachedHashes = 0;
   rows.testSelected([&](vector_size_t row) INLINE_LAMBDA {
@@ -284,22 +286,26 @@ bool VectorHasher::makeValueIdsDecoded(
     }
 
     auto baseIndex = indices[row];
-    uint64_t& id = cachedHashes_[baseIndex];
+    bool isCached = cachedHashes_.isSet(baseIndex);
 
     if (success) {
-      if (id == 0) {
+      uint64_t id;
+      if (!isCached) {
         T value = values[baseIndex];
         id = valueId(value);
+        cachedHashes_.setHash(baseIndex, id);
         numCachedHashes++;
         if (id == kUnmappable) {
           analyzeValue(value);
           success = false;
         }
+      } else {
+        id = cachedHashes_.getHash(baseIndex);
       }
       result[row] = multiplier_ == 1 ? id : result[row] + multiplier_ * id;
     } else {
-      if (id == 0) {
-        id = kUnmappable;
+      if (!isCached) {
+        cachedHashes_.setHash(baseIndex, kUnmappable);
         numCachedHashes++;
         analyzeValue(values[baseIndex]);
       }
@@ -406,7 +412,7 @@ template <TypeKind Kind>
 void VectorHasher::lookupValueIdsTyped(
     const DecodedVector& decoded,
     SelectivityVector& rows,
-    raw_vector<uint64_t>& hashes,
+    VersionedHashCache& hashes,
     uint64_t* result) const {
   using T = typename TypeTraits<Kind>::NativeType;
   if (decoded.isConstantMapping()) {
@@ -451,7 +457,7 @@ void VectorHasher::lookupValueIdsTyped(
     rows.updateBounds();
   } else {
     hashes.resize(decoded.base()->size());
-    std::fill(hashes.begin(), hashes.end(), 0);
+    hashes.reset();
     rows.applyToSelected([&](vector_size_t row) INLINE_LAMBDA {
       if (decoded.isNullAt(row)) {
         if (multiplier_ == 1) {
@@ -460,15 +466,17 @@ void VectorHasher::lookupValueIdsTyped(
         return;
       }
       auto baseIndex = decoded.index(row);
-      uint64_t id = hashes[baseIndex];
-      if (id == 0) {
+      uint64_t id;
+      if (!hashes.isSet(baseIndex)) {
         T value = decoded.valueAt<T>(row);
         id = lookupValueId(value);
         if (id == kUnmappable) {
           rows.setValid(row, false);
           return;
         }
-        hashes[baseIndex] = id;
+        hashes.setHash(baseIndex, id);
+      } else {
+        id = hashes.getHash(baseIndex);
       }
       result[row] = multiplier_ == 1 ? id : result[row] + multiplier_ * id;
     });
