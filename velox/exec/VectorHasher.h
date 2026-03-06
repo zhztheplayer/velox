@@ -115,6 +115,54 @@ struct UniqueValueComparer {
   }
 };
 
+/// Caches uint64_t hash values for a vector. The hash values are associated
+/// with their version numbers to determine if they are valid.
+/// When the version number is incremented, all cached values are invalidated
+/// within O(1) time.
+class VersionedHashCache {
+ public:
+  using VersionType = uint16_t;
+
+  FOLLY_ALWAYS_INLINE uint64_t getHash(vector_size_t index) const {
+    return hashes_[index];
+  }
+
+  FOLLY_ALWAYS_INLINE void setHash(vector_size_t index, uint64_t hash) {
+    hashes_[index] = hash;
+    versions_[index] = currentVersion_;
+  }
+
+  FOLLY_ALWAYS_INLINE bool isSet(vector_size_t index) const {
+    return versions_[index] == currentVersion_;
+  }
+
+  void resize(vector_size_t size) {
+    auto oldSize = versions_.size();
+    hashes_.resize(size);
+    versions_.resize(size);
+    if (size > oldSize) {
+      // Marks all new values as unversioned.
+      std::fill(versions_.data() + oldSize, versions_.data() + size, 0);
+    }
+  }
+
+  void reset() {
+    if (currentVersion_ == std::numeric_limits<VersionType>::max()) {
+      // When the version number reaches the maximum value, reset versions
+      // for all values and restart from 1.
+      std::fill(versions_.begin(), versions_.end(), 0);
+      currentVersion_ = 1;
+    } else {
+      ++currentVersion_;
+    }
+  }
+
+ private:
+  VersionType currentVersion_{1};
+  raw_vector<VersionType> versions_;
+  raw_vector<uint64_t> hashes_;
+};
+
 class VectorHasher {
  public:
   static constexpr uint64_t kUnmappable = ~0UL;

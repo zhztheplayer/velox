@@ -1140,6 +1140,56 @@ void testCustomComparison(const VectorPtr& actual, const VectorPtr& expected) {
   }
 }
 
+TEST_F(VectorHasherTest, versionedHashCache) {
+  VersionedHashCache cache;
+  cache.resize(3);
+
+  EXPECT_FALSE(cache.isSet(0));
+  EXPECT_FALSE(cache.isSet(1));
+  EXPECT_FALSE(cache.isSet(2));
+
+  cache.setHash(0, 11);
+  EXPECT_TRUE(cache.isSet(0));
+  EXPECT_EQ(11, cache.getHash(0));
+
+  cache.reset();
+  EXPECT_FALSE(cache.isSet(0));
+
+  cache.setHash(1, 22);
+  cache.setHash(2, 33);
+  EXPECT_TRUE(cache.isSet(1));
+  EXPECT_TRUE(cache.isSet(2));
+  EXPECT_EQ(22, cache.getHash(1));
+  EXPECT_EQ(33, cache.getHash(2));
+
+  // Resizes to 2 and verifies that the first 2 entries' validity remain
+  // unchanged.
+  cache.resize(2);
+  EXPECT_FALSE(cache.isSet(0));
+  EXPECT_TRUE(cache.isSet(1));
+
+  // Resizes to 5 and verifies that new entries are invalid.
+  cache.resize(5);
+  EXPECT_FALSE(cache.isSet(0));
+  EXPECT_TRUE(cache.isSet(1));
+  EXPECT_FALSE(cache.isSet(2));
+  EXPECT_FALSE(cache.isSet(3));
+  EXPECT_FALSE(cache.isSet(4));
+
+  // Advances one full version cycle, and verifies all entries are correctly
+  // invalidated.
+  for (uint32_t i = 0;
+       i < std::numeric_limits<VersionedHashCache::VersionType>::max();
+       ++i) {
+    cache.reset();
+  }
+  EXPECT_FALSE(cache.isSet(0));
+  EXPECT_FALSE(cache.isSet(1));
+  EXPECT_FALSE(cache.isSet(2));
+  EXPECT_FALSE(cache.isSet(3));
+  EXPECT_FALSE(cache.isSet(4));
+}
+
 TEST_F(VectorHasherTest, customComparison) {
   // Tests that types that provide custom comparison are hashed using the custom
   // hash implementation they provide.
