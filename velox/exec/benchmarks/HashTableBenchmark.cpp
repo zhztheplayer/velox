@@ -33,8 +33,17 @@
 DEFINE_int64(custom_size, 0, "Custom number of entries");
 DEFINE_int32(custom_hit_rate, 0, "Percentage of hits in custom test");
 DEFINE_int32(custom_key_spacing, 1, "Spacing between key values");
+DEFINE_int32(
+    custom_probe_scatter_multiplier,
+    1,
+    "Multiplier for probe key scatter base size (1 = no scatter, 2 = 1 gap "
+    "between entries, etc.)");
 
 DEFINE_int32(custom_num_ways, 10, "Number of build threads");
+DEFINE_int32(
+    custom_num_batches_per_way,
+    1,
+    "Number of input batches generated per way");
 
 DEFINE_bool(profile, false, "Generate perf profiles and memory stats");
 
@@ -53,13 +62,17 @@ struct HashTableBenchmarkParams {
       int64_t size,
       int32_t hitrate,
       int32_t keySpacing = 1,
-      int32_t _numWays = 10)
+      int32_t _numWays = 10,
+      int32_t _numBatchesPerWay = 1,
+      int32_t probeScatterMultiplier = 1)
       : title(std::move(title)),
         buildSize(size),
-        size(100 * (size / _numWays) / hitrate),
+        probeBatchSize(100 * (size / _numWays / _numBatchesPerWay) / hitrate),
         numWays(_numWays),
+        numBatchesPerWay(_numBatchesPerWay),
         insertPct(hitrate),
-        keySpacing(keySpacing) {}
+        keySpacing(keySpacing),
+        probeScatterMultiplier(probeScatterMultiplier) {}
 
   // Title for reporting
   std::string title;
@@ -70,10 +83,13 @@ struct HashTableBenchmarkParams {
   int64_t buildSize;
 
   // Number of distinct probe rows. Not all are necessarily in the table.
-  int32_t size;
+  int32_t probeBatchSize;
 
   // Number of build RowContainers.
   int32_t numWays;
+
+  // Number of batches generated for each way.
+  int32_t numBatchesPerWay{1};
 
   // Type of build row.
   TypePtr buildType{ROW({"k1"}, {BIGINT()})};
@@ -89,13 +105,19 @@ struct HashTableBenchmarkParams {
   // VectorHasher.
   int32_t keySpacing{1};
 
+  // If greater than 1, emulates sparse filtered input for probe-side key
+  // vectors by scattering rows into an expanded dictionary base and then
+  // wrapping it back to the original batch size.
+  int32_t probeScatterMultiplier{1};
+
   std::string toString() const {
     return fmt::format(
-        "{}: Rows={} Hit%={} NumProbes={}",
+        "{}: Rows={} Hit%={} NumProbes={} ProbeScatterX={}",
         title,
         buildSize,
         insertPct,
-        size * numWays);
+        probeBatchSize * numWays * numBatchesPerWay,
+        probeScatterMultiplier);
   }
 };
 
@@ -153,7 +175,9 @@ class HashTableBenchmark : public VectorTestBase {
     std::vector<TypePtr> dependentTypes;
     int32_t sequence = 0;
     isInTable_.resize(
-        bits::nwords(params_.numWays * params_.size),
+        bits::nwords(
+            params_.probeBatchSize * params_.numWays *
+            params_.numBatchesPerWay),
         static_cast<const std::vector<
             unsigned long,
             std::allocator<unsigned long>>::value_type>(-1));
@@ -161,7 +185,9 @@ class HashTableBenchmark : public VectorTestBase {
       // If we probe with all keys but only mean to insert part, we deselect.
       folly::Random::DefaultGenerator rng;
       rng.seed(1);
-      for (auto i = 0; i < params_.size * params_.numWays; ++i) {
+      for (auto i = 0; i <
+           params_.probeBatchSize * params_.numWays * params_.numBatchesPerWay;
+           ++i) {
         if (folly::Random::rand32(rng) % 100 > params_.insertPct) {
           bits::clearBit(isInTable_.data(), i);
         }
@@ -185,16 +211,21 @@ class HashTableBenchmark : public VectorTestBase {
           1'000,
           pool_.get());
 
-      makeRows(params_.size, 1, sequence, params_.buildType, batches);
+      makeRows(
+          params_.probeBatchSize,
+          params_.numBatchesPerWay,
+          sequence,
+          params_.buildType,
+          batches);
       copyVectorsToTable(batches, startOffset, table.get());
-      sequence += params_.size;
+      sequence += params_.probeBatchSize * params_.numBatchesPerWay;
       if (!topTable_) {
         topTable_ = std::move(table);
       } else {
         otherTables.push_back(std::move(table));
       }
       batches_.insert(batches_.end(), batches.begin(), batches.end());
-      startOffset += params_.size;
+      startOffset += params_.probeBatchSize * params_.numBatchesPerWay;
     }
     topTable_->prepareJoinTable(
         std::move(otherTables),
@@ -202,6 +233,11 @@ class HashTableBenchmark : public VectorTestBase {
         1'000'000,
         false,
         executor_.get());
+
+    if (params_.probeScatterMultiplier > 1) {
+      wrapProbeBatchesInSparseDictionary();
+    }
+
     LOG(INFO) << "Made table " << topTable_->toString();
 
     if (topTable_->hashMode() == BaseHashTable::HashMode::kNormalizedKey) {
@@ -416,6 +452,67 @@ class HashTableBenchmark : public VectorTestBase {
           std::static_pointer_cast<RowVector>(
               makeVector(buildType, batchSize, sequence)));
       sequence += batchSize;
+    }
+  }
+
+  void wrapProbeBatchesInSparseDictionary() {
+    VELOX_CHECK_GT(
+        params_.probeScatterMultiplier,
+        0,
+        "probeScatterMultiplier must be >= 1: {}",
+        params_.probeScatterMultiplier);
+
+    for (auto& batch : batches_) {
+      const auto batchSize = batch->size();
+      const auto scatterSize = batchSize * params_.probeScatterMultiplier;
+
+      auto scatterIndices =
+          AlignedBuffer::allocate<vector_size_t>(scatterSize, pool());
+      auto* rawScatterIndices = scatterIndices->asMutable<vector_size_t>();
+      auto scatterNulls =
+          AlignedBuffer::allocate<bool>(scatterSize, pool(), bits::kNull);
+
+      for (vector_size_t row = 0; row < scatterSize; ++row) {
+        rawScatterIndices[row] = 0;
+      }
+      for (vector_size_t row = 0; row < batchSize; ++row) {
+        const auto scatterRow = row * params_.probeScatterMultiplier;
+        rawScatterIndices[scatterRow] = row;
+        bits::setBit(scatterNulls->asMutable<uint64_t>(), scatterRow);
+      }
+
+      auto filterIndices =
+          AlignedBuffer::allocate<vector_size_t>(batchSize, pool());
+      auto* rawFilterIndices = filterIndices->asMutable<vector_size_t>();
+      for (vector_size_t row = 0; row < batchSize; ++row) {
+        rawFilterIndices[row] = row * params_.probeScatterMultiplier;
+      }
+      auto filterNulls =
+          AlignedBuffer::allocate<bool>(batchSize, pool(), bits::kNotNull);
+
+      std::vector<VectorPtr> children;
+      children.reserve(batch->childrenSize());
+      for (auto channel = 0; channel < batch->childrenSize(); ++channel) {
+        if (channel < params_.numKeys) {
+          auto scattered = VectorMaker::flatten(
+              BaseVector::wrapInDictionary(
+                  scatterNulls,
+                  scatterIndices,
+                  scatterSize,
+                  batch->childAt(channel)));
+          children.push_back(
+              BaseVector::wrapInDictionary(
+                  filterNulls, filterIndices, batchSize, scattered));
+        } else {
+          children.push_back(batch->childAt(channel));
+        }
+      }
+      batch = std::make_shared<RowVector>(
+          pool_.get(),
+          batch->type(),
+          BufferPtr(nullptr),
+          batchSize,
+          std::move(children));
     }
   }
 
@@ -661,19 +758,38 @@ int main(int argc, char** argv) {
       HashTableBenchmarkParams("Hit32M", 32000000, 100),
       HashTableBenchmarkParams("Miss32M", 32000000, 5),
 
-      HashTableBenchmarkParams("Hit128M", 128000000, 100)};
+      HashTableBenchmarkParams("Hit128M", 128000000, 100),
+
+      HashTableBenchmarkParams(
+          "Hit400KProbe4K1%", 400000, 100, 1, 1, 10000, 100),
+      HashTableBenchmarkParams(
+          "Hit400KProbe4K10%", 400000, 100, 1, 1, 1000, 10),
+      HashTableBenchmarkParams("Hit400KProbe4K100%", 400000, 100, 1, 1, 100, 1),
+      HashTableBenchmarkParams(
+          "Hit400KProbe40K10%", 400000, 100, 1, 1, 100, 10),
+      HashTableBenchmarkParams(
+          "Hit400KProbe400K1%", 400000, 100, 1, 1, 100, 100),
+      HashTableBenchmarkParams(
+          "Miss400KProbe4K1%", 400000, 5, 1, 1, 10000, 100),
+      HashTableBenchmarkParams("Miss400KProbe4K10%", 400000, 5, 1, 1, 1000, 10),
+      HashTableBenchmarkParams("Miss400KProbe4K100%", 400000, 5, 1, 1, 100, 1),
+      HashTableBenchmarkParams("Miss400KProbe40K10%", 400000, 5, 1, 1, 100, 10),
+      HashTableBenchmarkParams(
+          "Miss400KProbe400K1%", 400000, 5, 1, 1, 100, 100)};
   if (FLAGS_custom_size != 0) {
     params.push_back(HashTableBenchmarkParams(
         "Custom",
         FLAGS_custom_size,
         FLAGS_custom_hit_rate,
         FLAGS_custom_key_spacing,
-        FLAGS_custom_num_ways));
+        FLAGS_custom_num_ways,
+        FLAGS_custom_probe_scatter_multiplier,
+        FLAGS_custom_num_batches_per_way));
   }
 
   for (auto& param : params) {
     folly::addBenchmark(__FILE__, param.title, [param, &bm, &results]() {
-      std::string lastCase;
+      static std::string lastCase;
       if (lastCase != param.title) {
         lastCase = param.title;
         folly::BenchmarkSuspender suspender;
