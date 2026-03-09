@@ -21,6 +21,7 @@
 #include "velox/exec/HashTable.h"
 #include "velox/exec/Operator.h"
 #include "velox/exec/ProbeOperatorState.h"
+#include "velox/exec/RadixPartitioner.h"
 #include "velox/exec/VectorHasher.h"
 
 namespace facebook::velox::exec {
@@ -34,6 +35,18 @@ class HashProbe : public Operator {
   /// Number of rows bypassed via dynamic filter replacement.
   static constexpr std::string_view kReplacedWithDynamicFilterRows =
       "replacedWithDynamicFilterRows";
+  static constexpr std::string_view kRadixPartitionerEnabled =
+      "radixPartitionerEnabled";
+  static constexpr std::string_view kRadixMaxBufferedRowsPerPartition =
+      "radixMaxBufferedRowsPerPartition";
+  static constexpr std::string_view kRadixMinOutputBatchRows =
+      "radixMinOutputBatchRows";
+  static constexpr std::string_view kRadixPrepareInputWallNanos =
+      "radixPrepareInputWallNanos";
+  static constexpr std::string_view kRadixInputRows = "radixInputRows";
+  static constexpr std::string_view kRadixOutputRows = "radixOutputRows";
+  static constexpr std::string_view kRadixOutputBatches =
+      "radixOutputBatches";
 
   HashProbe(
       int32_t operatorId,
@@ -45,6 +58,9 @@ class HashProbe : public Operator {
   bool needsInput() const override {
     if (state_ == ProbeOperatorState::kFinish || noMoreInput_ ||
         noMoreSpillInput_ || input_ != nullptr) {
+      return false;
+    }
+    if (radixPartitioner_ != nullptr && radixPartitioner_->hasReadyOutput()) {
       return false;
     }
     if (table_) {
@@ -333,11 +349,17 @@ class HashProbe : public Operator {
   /// Decode join key inputs and populate 'nonNullInputRows_'.
   void decodeAndDetectNonNullKeys();
 
+  void prepareInputForProbe();
+
+  bool maybeLoadRadixPartitionedInput();
+
   // Invoked when there is no more input from either upstream task or spill
   // input. If there is remaining spilled data, then the last finished probe
   // operator is responsible for notifying the hash build operators to build the
   // next hash table from the spilled data.
   void noMoreInputInternal();
+
+  void addRadixRuntimeStats();
 
   // Indicates if this hash probe operator is under non-reclaimable state or
   // not.
@@ -454,6 +476,15 @@ class HashProbe : public Operator {
   // Current working hash table that is shared between other HashProbes in other
   // Drivers of the same pipeline.
   std::shared_ptr<BaseHashTable> table_;
+
+  std::unique_ptr<RadixPartitioner> radixPartitioner_;
+  bool radixRuntimeStatsReported_{false};
+  vector_size_t radixNumMaxBufferedRows_{0};
+  vector_size_t radixMinOutputBatchSize_{0};
+  uint64_t radixPrepareInputWallNanos_{0};
+  uint64_t radixInputRows_{0};
+  uint64_t radixOutputRows_{0};
+  uint64_t radixOutputBatches_{0};
 
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};

@@ -910,6 +910,65 @@ bool HashBuild::finishHashBuild() {
         allowParallelJoinBuild ? operatorCtx_->task()->queryCtx()->executor()
                                : nullptr);
   }
+  // The first radix-build iteration only supports the simple in-memory
+  // single-table case. Spilled input and merged peer tables are excluded.
+  const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+  const auto radixPartitionBits = queryConfig.radixJoinBits();
+  const auto estimatedTableBytes =
+      table_->estimateHashTableSize(table_->numDistinct()) +
+      table_->rows()->allocatedBytes();
+  const bool radixDisabledByMinTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes < queryConfig.radixJoinMinTableBytes();
+  const bool radixDisabledByMaxTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
+  bool radixEnabled{false};
+  CpuWallTiming radixTiming;
+  if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild &&
+      radixPartitionBits > 0 &&
+      estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
+      estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
+    // Array mode has no bucket-addressed layout, so normalize it to generic
+    // hash mode before attempting the radix rebuild. Hash and normalized-key
+    // modes are allowed to proceed directly.
+    if (table_->hashMode() == BaseHashTable::HashMode::kArray) {
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::beforeForceGenericForRadixBuild",
+          table_.get());
+      table_->forceGenericHashMode(
+          BaseHashTable::kNoSpillInputStartPartitionBit);
+    }
+    if (table_->canBuildRadixPartitions(radixPartitionBits)) {
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
+      {
+        CpuWallTimer cpuWallTimer{radixTiming};
+        table_->buildRadixPartitions(radixPartitionBits);
+      }
+      radixEnabled = true;
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
+    }
+  }
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixBits), RuntimeCounter(radixPartitionBits));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEstimatedTableBytes),
+      RuntimeCounter(estimatedTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMinTableBytes),
+      RuntimeCounter(radixDisabledByMinTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMaxTableBytes),
+      RuntimeCounter(radixDisabledByMaxTableBytes));
+  if (radixEnabled) {
+    stats_.wlock()->addRuntimeStat(
+        std::string(HashBuild::kRadixBuildWallNanos),
+        RuntimeCounter(radixTiming.wallNanos, RuntimeCounter::Unit::kNanos));
+  }
   stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kBuildWallNanos),
       RuntimeCounter(timing.wallNanos, RuntimeCounter::Unit::kNanos));

@@ -62,6 +62,18 @@ target_link_libraries(
   Folly::follybenchmark
 )
 
+add_executable(
+  velox_hash_fixed_probe_benchmark
+  HashTableFixedProbeBenchmark.cpp
+)
+
+target_link_libraries(
+  velox_hash_fixed_probe_benchmark
+  velox_exec
+  velox_vector_test_lib
+  Folly::follybenchmark
+)
+
 add_executable(velox_hash_join_list_result_benchmark HashJoinListResultBenchmark.cpp)
 
 target_link_libraries(
