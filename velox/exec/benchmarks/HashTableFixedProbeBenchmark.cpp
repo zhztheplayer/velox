@@ -29,16 +29,16 @@
 #include "velox/vector/tests/utils/VectorMaker.h"
 
 DEFINE_int64(
-    fixed_probe_build_size,
+    build_size,
     0,
     "Custom number of build rows. If zero, runs built-in cases.");
 DEFINE_int64(
-    fixed_probe_probe_size,
-    1000000,
+    probe_size,
+    1 << 30,
     "Number of probe rows for the custom case.");
 DEFINE_int64(
-    fixed_probe_batch_size,
-    1000000,
+    batch_size,
+    4096,
     "Maximum number of probe rows materialized at once.");
 
 using namespace facebook::velox;
@@ -113,7 +113,7 @@ class FixedProbeBenchmark {
     build_ = vectorMaker_.rowVector({"k1"}, {buildKeys});
 
     const auto batchSize = std::min<int64_t>(
-        params_.probeSize, std::max<int64_t>(1, FLAGS_fixed_probe_batch_size));
+        params_.probeSize, std::max<int64_t>(1, FLAGS_batch_size));
     probeKeys_ = vectorMaker_.flatVector<int64_t>(batchSize);
     probe_ = vectorMaker_.rowVector({"k1"}, {probeKeys_});
 
@@ -297,11 +297,11 @@ int main(int argc, char** argv) {
       FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30),
       FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30),
   };
-  if (FLAGS_fixed_probe_build_size != 0) {
+  if (FLAGS_build_size != 0) {
     params = {FixedProbeParams(
         "Custom",
-        FLAGS_fixed_probe_build_size,
-        FLAGS_fixed_probe_probe_size)};
+        FLAGS_build_size,
+        FLAGS_probe_size)};
   }
 
   for (const auto& param : params) {
