@@ -232,6 +232,9 @@ bool HashAggregation::startDrain() {
   VELOX_CHECK(isDraining());
   VELOX_CHECK(!noMoreInput_);
   VELOX_CHECK(
+      !groupingSet_->hasSpilled(),
+      "Barrier drain is not supported for spilled hash aggregation");
+  VELOX_CHECK(
       isPartialOutput_ == false,
       "Barrier drain is not supported for partial hash aggregation");
   VELOX_CHECK(!isGlobal_, "Barrier drain is not supported for global aggregation");
