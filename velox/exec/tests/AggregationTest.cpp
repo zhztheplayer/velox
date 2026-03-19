@@ -4524,7 +4524,7 @@ TEST_F(AggregationTest, barrierExecutionGlobalAggregation) {
           .serialExecution(true)
           .barrierExecution(true)
           .splits(scanNodeId, makeHiveConnectorSplits({file1, file2}))
-          .assertResults("VALUES (100), (260)");
+          .assertResults("VALUES (100), (260), (NULL)");
 
   ASSERT_EQ(task->taskStats().numBarriers, 2);
 }

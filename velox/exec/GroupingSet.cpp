@@ -859,6 +859,16 @@ void GroupingSet::resetTable(bool freeTable) {
   }
 }
 
+void GroupingSet::resetGlobalAggregation() {
+  if (!isGlobal_) {
+    return;
+  }
+  destroyGlobalAggregations();
+  rows_.clear();
+  stringAllocator_.clear();
+  globalAggregationInitialized_ = false;
+}
+
 bool GroupingSet::isPartialFull(int64_t maxBytes) {
   VELOX_CHECK(isPartial_);
   if (!table_ || allocatedBytes() <= maxBytes) {

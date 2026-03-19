@@ -237,14 +237,13 @@ bool HashAggregation::startDrain() {
   VELOX_CHECK(
       isPartialOutput_ == false,
       "Barrier drain is not supported for partial hash aggregation");
-  VELOX_CHECK(!isGlobal_, "Barrier drain is not supported for global aggregation");
   VELOX_CHECK(
       !isDistinct_, "Barrier drain is not supported for distinct aggregation");
   VELOX_CHECK(
       !abandonedPartialAggregation_,
       "Barrier drain is not supported for abandoned partial aggregation");
 
-  return groupingSet_ != nullptr && groupingSet_->numRows() > 0;
+  return true;
 }
 
 void HashAggregation::updateRuntimeStats() {
@@ -404,6 +403,9 @@ RowVectorPtr HashAggregation::getOutput() {
     resultIterator_.reset();
     if (isDraining() && !noMoreInput_) {
       groupingSet_->resetTable(/*freeTable=*/false);
+      if (isGlobal_) {
+        groupingSet_->resetGlobalAggregation();
+      }
       Operator::finishDrain();
       return nullptr;
     }
