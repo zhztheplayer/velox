@@ -234,9 +234,6 @@ bool HashAggregation::startDrain() {
   VELOX_CHECK(
       !groupingSet_->hasSpilled(),
       "Barrier drain is not supported for spilled hash aggregation");
-  VELOX_CHECK(
-      !abandonedPartialAggregation_,
-      "Barrier drain is not supported for abandoned partial aggregation");
 
   return true;
 }
@@ -359,6 +356,9 @@ RowVectorPtr HashAggregation::getOutput() {
       finished_ = true;
     }
     if (!input_) {
+      if (isDraining() && !noMoreInput_) {
+        Operator::finishDrain();
+      }
       return nullptr;
     }
     prepareOutput(input_->size());
