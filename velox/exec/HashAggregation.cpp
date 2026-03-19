@@ -238,8 +238,6 @@ bool HashAggregation::startDrain() {
       isPartialOutput_ == false,
       "Barrier drain is not supported for partial hash aggregation");
   VELOX_CHECK(
-      !isDistinct_, "Barrier drain is not supported for distinct aggregation");
-  VELOX_CHECK(
       !abandonedPartialAggregation_,
       "Barrier drain is not supported for abandoned partial aggregation");
 
@@ -385,7 +383,14 @@ RowVectorPtr HashAggregation::getOutput() {
   }
 
   if (isDistinct_) {
-    return getDistinctOutput();
+    auto distinctOutput = getDistinctOutput();
+    if (distinctOutput == nullptr) {
+      if (isDraining() && !noMoreInput_) {
+        groupingSet_->resetTable(/*freeTable=*/false);
+        Operator::finishDrain();
+      }
+    }
+    return distinctOutput;
   }
 
   const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
