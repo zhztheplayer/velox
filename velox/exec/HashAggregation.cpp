@@ -404,9 +404,13 @@ RowVectorPtr HashAggregation::getOutput() {
   if (!hasData) {
     resultIterator_.reset();
     if (isDraining() && !noMoreInput_) {
-      groupingSet_->resetTable(/*freeTable=*/false);
-      if (isGlobal_) {
-        groupingSet_->resetGlobalAggregation();
+      if (isPartialOutput_) {
+        resetPartialOutputIfNeed();
+      } else {
+        groupingSet_->resetTable(/*freeTable=*/false);
+        if (isGlobal_) {
+          groupingSet_->resetGlobalAggregation();
+        }
       }
       Operator::finishDrain();
       return nullptr;
