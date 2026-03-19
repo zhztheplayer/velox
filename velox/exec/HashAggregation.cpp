@@ -228,6 +228,22 @@ void HashAggregation::addInput(RowVectorPtr input) {
   }
 }
 
+bool HashAggregation::startDrain() {
+  VELOX_CHECK(isDraining());
+  VELOX_CHECK(!noMoreInput_);
+  VELOX_CHECK(
+      isPartialOutput_ == false,
+      "Barrier drain is not supported for partial hash aggregation");
+  VELOX_CHECK(!isGlobal_, "Barrier drain is not supported for global aggregation");
+  VELOX_CHECK(
+      !isDistinct_, "Barrier drain is not supported for distinct aggregation");
+  VELOX_CHECK(
+      !abandonedPartialAggregation_,
+      "Barrier drain is not supported for abandoned partial aggregation");
+
+  return groupingSet_ != nullptr && groupingSet_->numRows() > 0;
+}
+
 void HashAggregation::updateRuntimeStats() {
   // Report range sizes and number of distinct values for the group-by keys.
   const auto& hashers = groupingSet_->hashLookup().hashers;
@@ -360,7 +376,7 @@ RowVectorPtr HashAggregation::getOutput() {
   // - partial aggregation reached memory limit;
   // - distinct aggregation has new keys;
   // - running in partial streaming mode and have some output ready.
-  if (!noMoreInput_ && !partialFull_ && !newDistincts_ &&
+  if (!noMoreInput_ && !isDraining() && !partialFull_ && !newDistincts_ &&
       !groupingSet_->hasOutput()) {
     input_ = nullptr;
     return nullptr;
@@ -383,6 +399,11 @@ RowVectorPtr HashAggregation::getOutput() {
       output_);
   if (!hasData) {
     resultIterator_.reset();
+    if (isDraining() && !noMoreInput_) {
+      groupingSet_->resetTable(/*freeTable=*/false);
+      Operator::finishDrain();
+      return nullptr;
+    }
     if (noMoreInput_) {
       finished_ = true;
     }

@@ -1299,7 +1299,10 @@ class AggregationNode : public PlanNode {
   };
 
   bool supportsBarrier() const override {
-    return isPreGrouped();
+    return isPreGrouped() ||
+        (isSingle() && !groupingKeys_.empty() && preGroupedKeys_.empty() &&
+         !aggregates_.empty() && globalGroupingSets_.empty() &&
+         !groupId_.has_value());
   }
 
   const std::vector<PlanNodePtr>& sources() const override {
