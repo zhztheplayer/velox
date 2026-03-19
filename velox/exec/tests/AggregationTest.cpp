@@ -4764,45 +4764,38 @@ TEST_F(AggregationTest, barrierExecutionSortedAggregation) {
   ASSERT_EQ(task->taskStats().numBarriers, 2);
 }
 
-TEST_F(AggregationTest, barrierExecutionSpilledAggregation) {
+TEST_F(AggregationTest, barrierExecutionSpillEnabledAggregationUnsupported) {
   rowType_ = ROW({"c0", "c1"}, {BIGINT(), VARCHAR()});
-
   VectorFuzzer::Options options;
   options.vectorSize = 2'000;
   options.stringVariableLength = false;
   options.stringLength = 128;
   VectorFuzzer fuzzer(options, pool());
   auto data = fuzzer.fuzzRow(rowType_);
-  createDuckDbTable({data});
 
   auto file = TempFilePath::create();
   writeToFile(file->getPath(), data);
-
   auto spillDirectory = TempDirectoryPath::create();
   TestScopedSpillInjection scopedSpillInjection(100);
 
-  core::PlanNodeId aggrNodeId;
   core::PlanNodeId scanNodeId;
   auto plan = PlanBuilder()
                   .tableScan(asRowType(data->type()))
                   .capturePlanNodeId(scanNodeId)
                   .singleAggregation({"c0"}, {"array_agg(c1)"})
-                  .capturePlanNodeId(aggrNodeId)
                   .planNode();
 
-  auto task =
+  VELOX_ASSERT_THROW(
       AssertQueryBuilder(plan, duckDbQueryRunner_)
           .serialExecution(true)
           .barrierExecution(true)
           .spillDirectory(spillDirectory->getPath())
           .config(QueryConfig::kSpillEnabled, true)
           .config(QueryConfig::kAggregationSpillEnabled, true)
+          .config(QueryConfig::kMaxOutputBatchRows, 10)
           .split(scanNodeId, HiveConnectorTestBase::makeHiveConnectorSplit(file->getPath()))
-          .assertResults("SELECT c0, array_agg(c1) FROM tmp GROUP BY 1");
-
-  ASSERT_EQ(task->taskStats().numBarriers, 1);
-  ASSERT_GT(toPlanStats(task->taskStats()).at(aggrNodeId).spilledBytes, 0);
-  OperatorTestBase::deleteTaskAndCheckSpillDirectory(task);
+          .copyResults(pool()),
+      "Barrier drain is not supported for spilled hash aggregation");
 }
 
 } // namespace facebook::velox::exec::test
