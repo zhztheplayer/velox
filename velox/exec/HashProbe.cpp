@@ -760,19 +760,6 @@ void HashProbe::addInput(RowVectorPtr input) {
   table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
   lookup_->inputBytes = input_->retainedSize();
 
-  const auto recordRadixProbeStats = [&]() {
-    if (!table_->radixPartitioningEnabled()) {
-      return;
-    }
-    auto lockedStats = stats_.wlock();
-    lockedStats->addRuntimeStat(
-        std::string(BaseHashTable::kRadixProbePassCount),
-        RuntimeCounter(lookup_->radixProbePasses));
-    lockedStats->addRuntimeStat(
-        std::string(BaseHashTable::kRadixProbeInputBytes),
-        RuntimeCounter(lookup_->radixProbeInputBytes));
-  };
-
   if (joinIncludesMissesFromLeft(joinType_)) {
     // Make sure to allocate an entry in 'hits' for every input row to allow for
     // including rows without a match in the output. Also, make sure to
@@ -783,7 +770,6 @@ void HashProbe::addInput(RowVectorPtr input) {
     std::fill(hits.data(), hits.data() + numInput, nullptr);
     if (!lookup_->rows.empty()) {
       table_->joinProbe(*lookup_);
-      recordRadixProbeStats();
     }
 
     // Update lookup_->rows to include all input rows, not just
@@ -798,7 +784,6 @@ void HashProbe::addInput(RowVectorPtr input) {
     }
     lookup_->hits.resize(lookup_->rows.back() + 1);
     table_->joinProbe(*lookup_);
-    recordRadixProbeStats();
   }
 
   resultIter_->reset(*lookup_);

@@ -48,10 +48,6 @@ DEFINE_int64(
     radix_build_partition_memory_cap,
     0,
     "Per-partition build-side memory cap in bytes for radix in the custom case.");
-DEFINE_int64(
-    radix_probe_memory_cap,
-    0,
-    "Per-pass probe-side memory cap in bytes for radix in the custom case.");
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -59,27 +55,26 @@ using namespace facebook::velox::test;
 
 namespace {
 
+constexpr uint8_t kMaxBenchmarkRadixBits = 7;
+
 struct FixedProbeParams {
   std::string title;
   int64_t buildSize;
   int64_t probeSize;
   uint8_t radixPartitionBits{0};
   uint64_t radixBuildPartitionMemoryCapBytes{0};
-  uint64_t radixProbeMemoryCapBytes{0};
 
   FixedProbeParams(
       std::string title,
       int64_t buildSize,
       int64_t probeSize,
       uint8_t radixPartitionBits = 0,
-      uint64_t radixBuildPartitionMemoryCapBytes = 0,
-      uint64_t radixProbeMemoryCapBytes = 0)
+      uint64_t radixBuildPartitionMemoryCapBytes = 0)
       : title(std::move(title)),
         buildSize(buildSize),
         probeSize(probeSize),
         radixPartitionBits(radixPartitionBits),
-        radixBuildPartitionMemoryCapBytes(radixBuildPartitionMemoryCapBytes),
-        radixProbeMemoryCapBytes(radixProbeMemoryCapBytes) {
+        radixBuildPartitionMemoryCapBytes(radixBuildPartitionMemoryCapBytes) {
     VELOX_CHECK_GE(buildSize, 1, "buildSize must be positive");
     VELOX_CHECK_GE(probeSize, 1, "probeSize must be positive");
     VELOX_CHECK_GE(
@@ -90,15 +85,29 @@ struct FixedProbeParams {
 
   std::string toString() const {
     return fmt::format(
-        "{}: BuildRows={} ProbeRows={} RadixBits={} BuildCap={} ProbeCap={}",
+        "{}: BuildRows={} ProbeRows={} RadixBits={} BuildCap={}",
         title,
         buildSize,
         probeSize,
         radixPartitionBits,
-        radixBuildPartitionMemoryCapBytes,
-        radixProbeMemoryCapBytes);
+        radixBuildPartitionMemoryCapBytes);
   }
 };
+
+void validateRadixConfig(const FixedProbeParams& params) {
+  const auto errorText = fmt::format(
+      "Invalid radix benchmark config for '{}': radixPartitionBits={} is unsupported because "
+      "HashTable::partitionedJoinBuild currently takes a uint8_t numPartitions argument, so "
+      "'1 << radixPartitionBits' must fit in [1, 255]. Use radixPartitionBits <= {}.",
+      params.title,
+      params.radixPartitionBits,
+      kMaxBenchmarkRadixBits);
+  VELOX_CHECK_LE(
+      params.radixPartitionBits,
+      kMaxBenchmarkRadixBits,
+      "{}",
+      errorText);
+}
 
 struct FixedProbeResult {
   FixedProbeParams params{"default", 1, 2};
@@ -114,22 +123,18 @@ struct FixedProbeResult {
   BaseHashTable::HashMode mode{BaseHashTable::HashMode::kHash};
   uint8_t radixPartitionBits{0};
   uint64_t radixMaxBuildPartitionBytes{0};
-  uint64_t radixProbePasses{0};
-  uint64_t radixProbeInputBytes{0};
 
   std::string toString() const {
     std::stringstream out;
     out << params.toString() << '\n'
         << fmt::format(
-               "Hashed: {} Probed: {} Hit: {} Mode: {} RadixBits={} RadixMaxBuildPartitionBytes={} RadixProbePasses={} RadixProbeInputBytes={} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {}",
+               "Hashed: {} Probed: {} Hit: {} Mode: {} RadixBits={} RadixMaxBuildPartitionBytes={} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {}",
                numHashed,
                numProbed,
                numHit,
                BaseHashTable::modeString(mode),
                radixPartitionBits,
                radixMaxBuildPartitionBytes,
-               radixProbePasses,
-               radixProbeInputBytes,
                hashClocks,
                probeClocks,
                bucketBytes,
@@ -143,6 +148,7 @@ struct FixedProbeResult {
 class FixedProbeBenchmark {
  public:
   void makeData(const FixedProbeParams& params) {
+    validateRadixConfig(params);
     params_ = params;
     table_.reset();
     buildRows_.clear();
@@ -169,8 +175,7 @@ class FixedProbeBenchmark {
     if (params_.radixPartitionBits > 0) {
       table_->enableRadixPartitioning(
           params_.radixPartitionBits,
-          params_.radixBuildPartitionMemoryCapBytes,
-          params_.radixProbeMemoryCapBytes);
+          params_.radixBuildPartitionMemoryCapBytes);
     }
 
     populateRows(*build_, table_.get());
@@ -254,8 +259,6 @@ class FixedProbeBenchmark {
     result.mode = table_->hashMode();
     result.radixPartitionBits = table_->radixPartitionBits();
     result.radixMaxBuildPartitionBytes = table_->radixMaxBuildPartitionBytes();
-    result.radixProbePasses = lookup->radixProbePasses;
-    result.radixProbeInputBytes = lookup->radixProbeInputBytes;
 
     return result;
   }
@@ -328,35 +331,32 @@ int main(int argc, char** argv) {
   std::vector<FixedProbeResult> results;
 
   std::vector<FixedProbeParams> params = {
-      FixedProbeParams("Probe1GTable128B", 1 << 7, 1 << 30),
-      FixedProbeParams("Probe1GTable256B", 1 << 8, 1 << 30),
-      FixedProbeParams("Probe1GTable512B", 1 << 9, 1 << 30),
-      FixedProbeParams("Probe1GTable1K", 1 << 10, 1 << 30),
-      FixedProbeParams("Probe1GTable2K", 1 << 11, 1 << 30),
-      FixedProbeParams("Probe1GTable4K", 1 << 12, 1 << 30),
-      FixedProbeParams("Probe1GTable8K", 1 << 13, 1 << 30),
-      FixedProbeParams("Probe1GTable16K", 1 << 14, 1 << 30),
-      FixedProbeParams("Probe1GTable32K", 1 << 15, 1 << 30),
-      FixedProbeParams("Probe1GTable64K", 1 << 16, 1 << 30),
-      FixedProbeParams("Probe1GTable128K", 1 << 17, 1 << 30),
+      // FixedProbeParams("Probe1GTable128B", 1 << 7, 1 << 30),
+      // FixedProbeParams("Probe1GTable256B", 1 << 8, 1 << 30),
+      // FixedProbeParams("Probe1GTable512B", 1 << 9, 1 << 30),
+      // FixedProbeParams("Probe1GTable1K", 1 << 10, 1 << 30),
+      // FixedProbeParams("Probe1GTable2K", 1 << 11, 1 << 30),
+      // FixedProbeParams("Probe1GTable4K", 1 << 12, 1 << 30),
+      // FixedProbeParams("Probe1GTable8K", 1 << 13, 1 << 30),
+      // FixedProbeParams("Probe1GTable16K", 1 << 14, 1 << 30),
+      // FixedProbeParams("Probe1GTable32K", 1 << 15, 1 << 30),
+      // FixedProbeParams("Probe1GTable64K", 1 << 16, 1 << 30),
+      // FixedProbeParams("Probe1GTable128K", 1 << 17, 1 << 30),
       FixedProbeParams("Probe1GTable256K", 1 << 18, 1 << 30),
-      FixedProbeParams("Probe1GTable512K", 1 << 19, 1 << 30),
+      // FixedProbeParams("Probe1GTable512K", 1 << 19, 1 << 30),
       FixedProbeParams("Probe1GTable1M", 1 << 20, 1 << 30),
-      FixedProbeParams("Probe1GTable2M", 1 << 21, 1 << 30),
+      // FixedProbeParams("Probe1GTable2M", 1 << 21, 1 << 30),
       FixedProbeParams("Probe1GTable4M", 1 << 22, 1 << 30),
-      FixedProbeParams("Probe1GTable8M", 1 << 23, 1 << 30),
-      FixedProbeParams("Probe1GTable16M", 1 << 24, 1 << 30),
-      FixedProbeParams("Probe1GTable32M", 1 << 25, 1 << 30),
-      FixedProbeParams("Probe1GTable64M", 1 << 26, 1 << 30),
-      FixedProbeParams("Probe1GTable128M", 1 << 27, 1 << 30),
-      FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30),
-      FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30),
-      FixedProbeParams(
-          "RadixProbe1GTable256K", 1 << 18, 1 << 30, 10, 1 << 16, 1 << 12),
-      FixedProbeParams(
-          "RadixProbe1GTable1M", 1 << 20, 1 << 30, 10, 1 << 18, 1 << 12),
-      FixedProbeParams(
-          "RadixProbe1GTable4M", 1 << 22, 1 << 30, 12, 1 << 18, 1 << 12),
+      // FixedProbeParams("Probe1GTable8M", 1 << 23, 1 << 30),
+      // FixedProbeParams("Probe1GTable16M", 1 << 24, 1 << 30),
+      // FixedProbeParams("Probe1GTable32M", 1 << 25, 1 << 30),
+      // FixedProbeParams("Probe1GTable64M", 1 << 26, 1 << 30),
+      // FixedProbeParams("Probe1GTable128M", 1 << 27, 1 << 30),
+      // FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30),
+      // FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30),
+      FixedProbeParams("RadixProbe1GTable256K", 1 << 18, 1 << 30, 7, 0),
+      FixedProbeParams("RadixProbe1GTable1M", 1 << 20, 1 << 30, 7, 0),
+      FixedProbeParams("RadixProbe1GTable4M", 1 << 22, 1 << 30, 7, 0),
   };
   if (FLAGS_build_size != 0) {
     params = {FixedProbeParams(
@@ -364,8 +364,7 @@ int main(int argc, char** argv) {
         FLAGS_build_size,
         FLAGS_probe_size,
         FLAGS_radix_partition_bits,
-        FLAGS_radix_build_partition_memory_cap,
-        FLAGS_radix_probe_memory_cap)};
+        FLAGS_radix_build_partition_memory_cap)};
   }
 
   for (const auto& param : params) {

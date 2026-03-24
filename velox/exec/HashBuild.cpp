@@ -273,8 +273,7 @@ void HashBuild::setupTable() {
   if (queryConfig.hashJoinRadixPartitioningEnabled()) {
     table_->enableRadixPartitioning(
         queryConfig.hashJoinRadixPartitionBits(),
-        queryConfig.hashJoinRadixBuildPartitionMemoryCap(),
-        queryConfig.hashJoinRadixProbeMemoryCap());
+        queryConfig.hashJoinRadixBuildPartitionMemoryCap());
   }
   if (abandonHashBuildDedupMinPct_ == 0) {
     // Building a HashTable without duplicates is disabled if

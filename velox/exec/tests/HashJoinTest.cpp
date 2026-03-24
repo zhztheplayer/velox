@@ -269,9 +269,6 @@ TEST_P(MultiThreadedHashJoinTest, radixPartitionedPrototype) {
       .config(
           core::QueryConfig::kHashJoinRadixBuildPartitionMemoryCap,
           std::to_string(kBuildCapBytes))
-      .config(
-          core::QueryConfig::kHashJoinRadixProbeMemoryCap,
-          "512")
       .referenceQuery(
           "SELECT t_k0, t_k1, t_data, u_k0, u_k1, u_data FROM t, u WHERE t_k0 = u_k0 AND t_k1 = u_k1")
       .injectSpill(false)

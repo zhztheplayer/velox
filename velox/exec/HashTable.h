@@ -69,8 +69,6 @@ struct HashLookup {
     hits.resize(size);
     newGroups.clear();
     inputBytes = 0;
-    radixProbePasses = 0;
-    radixProbeInputBytes = 0;
   }
 
   /// One entry per group-by or join key.
@@ -102,13 +100,6 @@ struct HashLookup {
 
   /// Estimated bytes retained by the current probe input batch.
   uint64_t inputBytes{0};
-
-  /// Number of radix probe passes used for the current probe batch.
-  uint64_t radixProbePasses{0};
-
-  /// Estimated bytes of the current probe batch when radix capped probing is
-  /// used.
-  uint64_t radixProbeInputBytes{0};
 
   /// If using valueIds, list of concatenated valueIds. 1:1 with 'hashes'.
   /// Populated by groupProbe and joinProbe.
@@ -184,10 +175,6 @@ class BaseHashTable {
       "hashtable.radixPartitionCount"};
   static constexpr std::string_view kRadixMaxBuildPartitionBytes{
       "hashtable.radixMaxBuildPartitionBytes"};
-  static constexpr std::string_view kRadixProbePassCount{
-      "hashtable.radixProbePassCount"};
-  static constexpr std::string_view kRadixProbeInputBytes{
-      "hashtable.radixProbeInputBytes"};
 
   /// Returns the string of the given 'mode'.
   static std::string modeString(HashMode mode);
@@ -517,13 +504,18 @@ class BaseHashTable {
       int32_t columnIndex,
       const VectorPtr& result) = 0;
 
+  /// Configures radix partitioning for join build and probe.
+  /// 'bits' is the maximum radix width to consider; the actual selected value
+  /// may be lower after analyzing the build-side data.
+  /// 'buildPartitionMemoryCapBytes' is the target upper bound for the estimated
+  /// memory footprint of each build-side radix subtable. Zero disables this cap.
+  /// If the cap cannot be met within 'bits', the build still uses the maximum
+  /// admissible radix width and records the resulting estimated partition size.
   void enableRadixPartitioning(
       uint8_t bits,
-      uint64_t buildPartitionMemoryCapBytes = 0,
-      uint64_t probeMemoryCapBytes = 0) {
+      uint64_t buildPartitionMemoryCapBytes = 0) {
     radixMaxPartitionBits_ = bits;
     radixBuildPartitionMemoryCapBytes_ = buildPartitionMemoryCapBytes;
-    radixProbeMemoryCapBytes_ = probeMemoryCapBytes;
     radixPartitionBits_ = 0;
   }
 
@@ -547,10 +539,6 @@ class BaseHashTable {
     return radixBuildPartitionMemoryCapBytes_;
   }
 
-  uint64_t radixProbeMemoryCapBytes() const {
-    return radixProbeMemoryCapBytes_;
-  }
-
   uint64_t radixMaxBuildPartitionBytes() const {
     return radixMaxBuildPartitionBytes_;
   }
@@ -571,7 +559,6 @@ class BaseHashTable {
   uint8_t radixPartitionBits_{0};
   uint8_t radixMaxPartitionBits_{0};
   uint64_t radixBuildPartitionMemoryCapBytes_{0};
-  uint64_t radixProbeMemoryCapBytes_{0};
   uint64_t radixMaxBuildPartitionBytes_{0};
 
   ParallelJoinBuildStats parallelJoinBuildStats_;

@@ -619,8 +619,6 @@ void HashTable<ignoreNullKeys>::arrayGroupProbe(HashLookup& lookup) {
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
   incrementProbes(lookup.rows.size());
-  lookup.radixProbePasses = 0;
-  lookup.radixProbeInputBytes = 0;
   std::vector<PartitionBoundIndexType> localPartitionBounds;
   const PartitionBoundIndexType* partitionBounds = nullptr;
   int32_t numPartitionBounds = 0;
@@ -667,48 +665,6 @@ void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
       partitionedRows[partitionStart++] = row;
     }
     lookup.rows = std::move(partitionedRows);
-
-    if (radixProbeMemoryCapBytes_ > 0) {
-      constexpr uint64_t kProbeWorkingSetBytesPerRow =
-          sizeof(vector_size_t) + sizeof(uint64_t) + sizeof(char*);
-      lookup.radixProbeInputBytes = std::max<uint64_t>(
-          lookup.inputBytes,
-          lookup.rows.size() * kProbeWorkingSetBytesPerRow);
-      const auto bytesPerRow = kProbeWorkingSetBytesPerRow;
-      const auto maxRowsPerPass = std::max<vector_size_t>(
-          1, radixProbeMemoryCapBytes_ / bytesPerRow);
-      if (lookup.rows.size() <= maxRowsPerPass) {
-        joinProbeRows(lookup, lookup.rows.data(), lookup.rows.size());
-        return;
-      }
-      const auto* rows = lookup.rows.data();
-      vector_size_t partitionStart{0};
-      while (partitionStart < lookup.rows.size()) {
-        auto partitionEnd = partitionStart + 1;
-        const auto partition = findPartition(
-            bucketOffset(lookup.hashes[rows[partitionStart]]), partitionBounds, numPartitionBounds);
-        while (partitionEnd < lookup.rows.size() &&
-               findPartition(
-                   bucketOffset(lookup.hashes[rows[partitionEnd]]),
-                   partitionBounds,
-                   numPartitionBounds) == partition) {
-          ++partitionEnd;
-        }
-        for (auto passStart = partitionStart; passStart < partitionEnd;
-             passStart += maxRowsPerPass) {
-          const auto numRows = std::min<vector_size_t>(
-              maxRowsPerPass, partitionEnd - passStart);
-          auto testPassRows = numRows;
-          TestValue::adjust(
-              "facebook::velox::exec::HashTable::radixProbePass",
-              &testPassRows);
-          joinProbeRows(lookup, rows + passStart, numRows);
-          ++lookup.radixProbePasses;
-        }
-        partitionStart = partitionEnd;
-      }
-      return;
-    }
   }
   joinProbeRows(lookup, lookup.rows.data(), lookup.rows.size());
 }

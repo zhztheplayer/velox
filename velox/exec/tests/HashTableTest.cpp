@@ -866,9 +866,8 @@ TEST_P(HashTableTest, regularHashingTableSize) {
   }
 }
 
-TEST_P(HashTableTest, radixProbeRespectsMemoryCap) {
+TEST_P(HashTableTest, radixProbeClustersRows) {
   static constexpr uint64_t kBuildCapBytes = 192ULL << 10;
-  static constexpr uint64_t kProbeCapBytes = 512;
   auto rowType = ROW({"k0", "k1"}, {BIGINT(), VARCHAR()});
 
   std::vector<std::unique_ptr<VectorHasher>> keyHashers;
@@ -879,7 +878,7 @@ TEST_P(HashTableTest, radixProbeRespectsMemoryCap) {
 
   auto table = HashTable<true>::createForJoin(
       std::move(keyHashers), {}, true, false, 1'000, pool());
-  table->enableRadixPartitioning(6, kBuildCapBytes, kProbeCapBytes);
+  table->enableRadixPartitioning(6, kBuildCapBytes);
 
   std::vector<RowVectorPtr> buildBatches;
   makeRows(4'000, 10, 0, rowType, buildBatches);
@@ -905,8 +904,7 @@ TEST_P(HashTableTest, radixProbeRespectsMemoryCap) {
     ASSERT_FALSE(lookup.rows.empty());
     lookup.inputBytes = batch->retainedSize();
     table->joinProbe(lookup);
-    ASSERT_GT(lookup.radixProbePasses, 1);
-    ASSERT_GT(lookup.radixProbeInputBytes, kProbeCapBytes);
+    ASSERT_EQ(lookup.rows.size(), batch->size());
   }
 }
 

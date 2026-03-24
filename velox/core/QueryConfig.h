@@ -575,8 +575,6 @@ class QueryConfig {
 
   /// Maximum estimated bytes of probe input rows to process in a single radix
   /// probe pass. Zero disables capped partition-by-partition probing.
-  static constexpr const char* kHashJoinRadixProbeMemoryCap =
-      "hash_join_radix_probe_memory_cap";
 
   /// Whether hash probe can generate any dynamic filter (including Bloom
   /// filter) and push down to upstream operators.
@@ -1412,10 +1410,6 @@ class QueryConfig {
 
   uint64_t hashJoinRadixBuildPartitionMemoryCap() const {
     return get<uint64_t>(kHashJoinRadixBuildPartitionMemoryCap, 0);
-  }
-
-  uint64_t hashJoinRadixProbeMemoryCap() const {
-    return get<uint64_t>(kHashJoinRadixProbeMemoryCap, 0);
   }
 
   bool hashProbeDynamicFilterPushdownEnabled() const {
