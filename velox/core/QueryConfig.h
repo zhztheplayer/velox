@@ -567,6 +567,17 @@ class QueryConfig {
   static constexpr const char* kHashJoinRadixPartitionBits =
       "hash_join_radix_partition_bits";
 
+  /// Maximum estimated bytes allowed for a single radix build partition. Zero
+  /// disables adaptive partition selection and uses kHashJoinRadixPartitionBits
+  /// directly.
+  static constexpr const char* kHashJoinRadixBuildPartitionMemoryCap =
+      "hash_join_radix_build_partition_memory_cap";
+
+  /// Maximum estimated bytes of probe input rows to process in a single radix
+  /// probe pass. Zero disables capped partition-by-partition probing.
+  static constexpr const char* kHashJoinRadixProbeMemoryCap =
+      "hash_join_radix_probe_memory_cap";
+
   /// Whether hash probe can generate any dynamic filter (including Bloom
   /// filter) and push down to upstream operators.
   static constexpr const char* kHashProbeDynamicFilterPushdownEnabled =
@@ -1397,6 +1408,14 @@ class QueryConfig {
     constexpr uint8_t kMaxBits = 8;
     return std::min(
         kMaxBits, get<uint8_t>(kHashJoinRadixPartitionBits, kDefaultBits));
+  }
+
+  uint64_t hashJoinRadixBuildPartitionMemoryCap() const {
+    return get<uint64_t>(kHashJoinRadixBuildPartitionMemoryCap, 0);
+  }
+
+  uint64_t hashJoinRadixProbeMemoryCap() const {
+    return get<uint64_t>(kHashJoinRadixProbeMemoryCap, 0);
   }
 
   bool hashProbeDynamicFilterPushdownEnabled() const {

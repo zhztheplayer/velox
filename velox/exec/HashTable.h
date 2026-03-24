@@ -68,6 +68,9 @@ struct HashLookup {
     hashes.resize(size);
     hits.resize(size);
     newGroups.clear();
+    inputBytes = 0;
+    radixProbePasses = 0;
+    radixProbeInputBytes = 0;
   }
 
   /// One entry per group-by or join key.
@@ -96,6 +99,16 @@ struct HashLookup {
   /// For groupProbe, row numbers for which a new entry was inserted (didn't
   /// exist before the groupProbe). Empty for joinProbe.
   std::vector<vector_size_t> newGroups;
+
+  /// Estimated bytes retained by the current probe input batch.
+  uint64_t inputBytes{0};
+
+  /// Number of radix probe passes used for the current probe batch.
+  uint64_t radixProbePasses{0};
+
+  /// Estimated bytes of the current probe batch when radix capped probing is
+  /// used.
+  uint64_t radixProbeInputBytes{0};
 
   /// If using valueIds, list of concatenated valueIds. 1:1 with 'hashes'.
   /// Populated by groupProbe and joinProbe.
@@ -169,6 +182,12 @@ class BaseHashTable {
   static constexpr std::string_view kHashTableCacheMiss{"hashtable.cacheMiss"};
   static constexpr std::string_view kRadixPartitionCount{
       "hashtable.radixPartitionCount"};
+  static constexpr std::string_view kRadixMaxBuildPartitionBytes{
+      "hashtable.radixMaxBuildPartitionBytes"};
+  static constexpr std::string_view kRadixProbePassCount{
+      "hashtable.radixProbePassCount"};
+  static constexpr std::string_view kRadixProbeInputBytes{
+      "hashtable.radixProbeInputBytes"};
 
   /// Returns the string of the given 'mode'.
   static std::string modeString(HashMode mode);
@@ -498,16 +517,42 @@ class BaseHashTable {
       int32_t columnIndex,
       const VectorPtr& result) = 0;
 
-  void enableRadixPartitioning(uint8_t bits) {
-    radixPartitionBits_ = bits;
+  void enableRadixPartitioning(
+      uint8_t bits,
+      uint64_t buildPartitionMemoryCapBytes = 0,
+      uint64_t probeMemoryCapBytes = 0) {
+    radixMaxPartitionBits_ = bits;
+    radixBuildPartitionMemoryCapBytes_ = buildPartitionMemoryCapBytes;
+    radixProbeMemoryCapBytes_ = probeMemoryCapBytes;
+    radixPartitionBits_ = 0;
   }
 
   bool radixPartitioningEnabled() const {
     return radixPartitionBits_ > 0;
   }
 
+  bool radixPartitioningRequested() const {
+    return radixMaxPartitionBits_ > 0;
+  }
+
   uint8_t radixPartitionBits() const {
     return radixPartitionBits_;
+  }
+
+  uint8_t radixMaxPartitionBits() const {
+    return radixMaxPartitionBits_;
+  }
+
+  uint64_t radixBuildPartitionMemoryCapBytes() const {
+    return radixBuildPartitionMemoryCapBytes_;
+  }
+
+  uint64_t radixProbeMemoryCapBytes() const {
+    return radixProbeMemoryCapBytes_;
+  }
+
+  uint64_t radixMaxBuildPartitionBytes() const {
+    return radixMaxBuildPartitionBytes_;
   }
 
  protected:
@@ -524,6 +569,10 @@ class BaseHashTable {
   std::vector<std::unique_ptr<VectorHasher>> hashers_;
   std::unique_ptr<RowContainer> rows_;
   uint8_t radixPartitionBits_{0};
+  uint8_t radixMaxPartitionBits_{0};
+  uint64_t radixBuildPartitionMemoryCapBytes_{0};
+  uint64_t radixProbeMemoryCapBytes_{0};
+  uint64_t radixMaxBuildPartitionBytes_{0};
 
   ParallelJoinBuildStats parallelJoinBuildStats_;
   CpuWallTiming vectorHasherMergeTiming_;
@@ -986,6 +1035,12 @@ class HashTable : public BaseHashTable {
 
   bool canApplyRadixPartitionBuild() const;
 
+  uint8_t selectRadixPartitionBits();
+
+  std::vector<uint64_t> buildRadixPartitionRowCounts(uint8_t bits);
+
+  uint64_t estimateBuildPartitionBytes(uint64_t numRows) const;
+
   // Builds a join table one radix partition at a time. This reuses the
   // existing parallel join build path when an executor is available, but also
   // allows a sequential prototype path when the table is configured with
@@ -1046,9 +1101,23 @@ class HashTable : public BaseHashTable {
 
   // Array probe with SIMD.
   void arrayJoinProbe(HashLookup& lookup);
+  void arrayJoinProbe(
+      const vector_size_t* rows,
+      int32_t numRows,
+      const uint64_t* hashes,
+      char** hits);
 
   // Shortcut for probe with normalized keys.
   void joinNormalizedKeyProbe(HashLookup& lookup);
+  void joinNormalizedKeyProbe(
+      HashLookup& lookup,
+      const vector_size_t* rows,
+      int32_t numRows);
+
+  void joinProbeRows(
+      HashLookup& lookup,
+      const vector_size_t* rows,
+      int32_t numRows);
 
   // Returns the total size of the variable size 'columns' in 'row'.
   // NOTE: No checks are done in the method for performance considerations.

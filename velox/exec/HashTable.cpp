@@ -15,6 +15,7 @@
  */
 
 #include "velox/exec/HashTable.h"
+#include <cmath>
 #include "velox/common/base/AsyncSource.h"
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/base/Portability.h"
@@ -618,14 +619,36 @@ void HashTable<ignoreNullKeys>::arrayGroupProbe(HashLookup& lookup) {
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
   incrementProbes(lookup.rows.size());
-  if (!radixPartitionBounds_.empty() && lookup.rows.size() > 1) {
+  lookup.radixProbePasses = 0;
+  lookup.radixProbeInputBytes = 0;
+  std::vector<PartitionBoundIndexType> localPartitionBounds;
+  const PartitionBoundIndexType* partitionBounds = nullptr;
+  int32_t numPartitionBounds = 0;
+  if (radixPartitioningEnabled()) {
+    if (!radixPartitionBounds_.empty()) {
+      partitionBounds = radixPartitionBounds_.data();
+      numPartitionBounds = radixPartitionBounds_.size();
+    } else {
+      const auto numPartitions = uint32_t{1} << radixPartitionBits_;
+      localPartitionBounds.resize(numPartitions + 1);
+      for (uint32_t i = 0; i < numPartitions; ++i) {
+        localPartitionBounds[i] =
+            bits::roundUp(((sizeMask_ + 1) / numPartitions) * i, kBucketSize);
+      }
+      localPartitionBounds.back() = sizeMask_ + 1;
+      partitionBounds = localPartitionBounds.data();
+      numPartitionBounds = localPartitionBounds.size();
+    }
+  }
+
+  if (partitionBounds != nullptr && lookup.rows.size() > 1) {
     std::vector<vector_size_t> partitionStarts(
-        radixPartitionBounds_.size(), 0);
+        numPartitionBounds - 1, 0);
     for (const auto row : lookup.rows) {
       ++partitionStarts[findPartition(
           bucketOffset(lookup.hashes[row]),
-          radixPartitionBounds_.data(),
-          radixPartitionBounds_.size())];
+          partitionBounds,
+          numPartitionBounds)];
     }
 
     vector_size_t nextStart{0};
@@ -639,24 +662,72 @@ void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
     for (const auto row : lookup.rows) {
       auto& partitionStart = partitionStarts[findPartition(
           bucketOffset(lookup.hashes[row]),
-          radixPartitionBounds_.data(),
-          radixPartitionBounds_.size())];
+          partitionBounds,
+          numPartitionBounds)];
       partitionedRows[partitionStart++] = row;
     }
     lookup.rows = std::move(partitionedRows);
+
+    if (radixProbeMemoryCapBytes_ > 0) {
+      constexpr uint64_t kProbeWorkingSetBytesPerRow =
+          sizeof(vector_size_t) + sizeof(uint64_t) + sizeof(char*);
+      lookup.radixProbeInputBytes = std::max<uint64_t>(
+          lookup.inputBytes,
+          lookup.rows.size() * kProbeWorkingSetBytesPerRow);
+      const auto bytesPerRow = kProbeWorkingSetBytesPerRow;
+      const auto maxRowsPerPass = std::max<vector_size_t>(
+          1, radixProbeMemoryCapBytes_ / bytesPerRow);
+      if (lookup.rows.size() <= maxRowsPerPass) {
+        joinProbeRows(lookup, lookup.rows.data(), lookup.rows.size());
+        return;
+      }
+      const auto* rows = lookup.rows.data();
+      vector_size_t partitionStart{0};
+      while (partitionStart < lookup.rows.size()) {
+        auto partitionEnd = partitionStart + 1;
+        const auto partition = findPartition(
+            bucketOffset(lookup.hashes[rows[partitionStart]]), partitionBounds, numPartitionBounds);
+        while (partitionEnd < lookup.rows.size() &&
+               findPartition(
+                   bucketOffset(lookup.hashes[rows[partitionEnd]]),
+                   partitionBounds,
+                   numPartitionBounds) == partition) {
+          ++partitionEnd;
+        }
+        for (auto passStart = partitionStart; passStart < partitionEnd;
+             passStart += maxRowsPerPass) {
+          const auto numRows = std::min<vector_size_t>(
+              maxRowsPerPass, partitionEnd - passStart);
+          auto testPassRows = numRows;
+          TestValue::adjust(
+              "facebook::velox::exec::HashTable::radixProbePass",
+              &testPassRows);
+          joinProbeRows(lookup, rows + passStart, numRows);
+          ++lookup.radixProbePasses;
+        }
+        partitionStart = partitionEnd;
+      }
+      return;
+    }
   }
+  joinProbeRows(lookup, lookup.rows.data(), lookup.rows.size());
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::joinProbeRows(
+    HashLookup& lookup,
+    const vector_size_t* rows,
+    int32_t numProbes) {
   if (hashMode_ == HashMode::kArray) {
-    arrayJoinProbe(lookup);
+    arrayJoinProbe(rows, numProbes, lookup.hashes.data(), lookup.hits.data());
     return;
   }
   if (hashMode_ == HashMode::kNormalizedKey) {
     populateNormalizedKeys(lookup, sizeBits_);
-    joinNormalizedKeyProbe(lookup);
+    joinNormalizedKeyProbe(lookup, rows, numProbes);
     return;
   }
   int32_t probeIndex = 0;
-  int32_t numProbes = lookup.rows.size();
-  const vector_size_t* rows = lookup.rows.data();
   ProbeState state1;
   ProbeState state2;
   ProbeState state3;
@@ -689,11 +760,20 @@ void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
 
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::arrayJoinProbe(HashLookup& lookup) {
+  arrayJoinProbe(
+      lookup.rows.data(),
+      lookup.rows.size(),
+      lookup.hashes.data(),
+      lookup.hits.data());
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::arrayJoinProbe(
+    const vector_size_t* rows,
+    int32_t numRows,
+    const uint64_t* hashes,
+    char** hits) {
   // Rows are nearly always consecutive.
-  auto& rows = lookup.rows;
-  auto hashes = lookup.hashes.data();
-  auto hits = lookup.hits.data();
-  auto numRows = rows.size();
   int32_t i = 0;
   constexpr int32_t kBatchSize = xsimd::batch<int64_t>::size;
   constexpr int32_t kStep = kBatchSize * 2;
@@ -731,9 +811,15 @@ void HashTable<ignoreNullKeys>::arrayJoinProbe(HashLookup& lookup) {
 
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::joinNormalizedKeyProbe(HashLookup& lookup) {
+  joinNormalizedKeyProbe(lookup, lookup.rows.data(), lookup.rows.size());
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::joinNormalizedKeyProbe(
+    HashLookup& lookup,
+    const vector_size_t* rows,
+    int32_t numProbes) {
   int32_t probeIndex = 0;
-  int32_t numProbes = lookup.rows.size();
-  const vector_size_t* rows = lookup.rows.data();
   ProbeState states[kPrefetchSize];
   const uint64_t* keys = lookup.normalizedKeys.data();
   const uint64_t* hashes = lookup.hashes.data();
@@ -1038,6 +1124,122 @@ bool HashTable<ignoreNullKeys>::canApplyRadixPartitionBuild() const {
   }
   const auto numPartitions = uint32_t{1} << radixPartitionBits_;
   return numPartitions > 1 && capacity_ >= numPartitions;
+}
+
+template <bool ignoreNullKeys>
+uint64_t HashTable<ignoreNullKeys>::estimateBuildPartitionBytes(
+    uint64_t numRows) const {
+  if (numRows == 0 || numDistinct_ == 0) {
+    return 0;
+  }
+
+  long double totalRowBytes = 0;
+  const auto accumulateRowBytes = [&](const RowContainer* rowContainer) {
+    const auto estimatedRowSize = rowContainer->estimateRowSize();
+    if (estimatedRowSize.has_value()) {
+      totalRowBytes +=
+          static_cast<long double>(estimatedRowSize.value()) * rowContainer->numRows();
+    } else {
+      totalRowBytes += rowContainer->allocatedBytes();
+    }
+  };
+
+  accumulateRowBytes(rows_.get());
+  for (const auto& other : otherTables_) {
+    accumulateRowBytes(other->rows());
+  }
+
+  const auto estimatedRowBytes = std::max<uint64_t>(
+      1, static_cast<uint64_t>(std::ceil(totalRowBytes / numDistinct_)));
+  const auto hashTableBytes = bits::roundUp(
+      (hashMode_ == HashMode::kArray
+           ? std::max<uint64_t>(kArrayHashMaxSize, newHashTableEntries(numRows, 0))
+           : newHashTableEntries(numRows, 0)) *
+          tableSlotSize(),
+      memory::AllocationTraits::kPageSize);
+  return hashTableBytes + estimatedRowBytes * numRows;
+}
+
+template <bool ignoreNullKeys>
+std::vector<uint64_t> HashTable<ignoreNullKeys>::buildRadixPartitionRowCounts(
+    uint8_t bits) {
+  const auto numPartitions = uint32_t{1} << bits;
+  std::vector<PartitionBoundIndexType> partitionBounds(
+      numPartitions + 1, std::numeric_limits<PartitionBoundIndexType>::max());
+  for (uint32_t i = 0; i < numPartitions; ++i) {
+    partitionBounds[i] =
+        bits::roundUp(((sizeMask_ + 1) / numPartitions) * i, kBucketSize);
+  }
+  partitionBounds.back() = sizeMask_ + 1;
+
+  std::vector<uint64_t> counts(numPartitions, 0);
+  raw_vector<char*> rows(kHashBatchSize, pool_);
+  raw_vector<uint64_t> hashes(kHashBatchSize, pool_);
+  for (int32_t tableIndex = 0; tableIndex <= otherTables_.size(); ++tableIndex) {
+    RowContainerIterator iterator;
+    auto* table = tableIndex == 0 ? this : otherTables_[tableIndex - 1].get();
+    while (const auto numRows =
+               table->rows()->listRows(&iterator, kHashBatchSize, rows.data())) {
+      VELOX_CHECK(hashRows(folly::Range(rows.data(), numRows), true, hashes));
+      for (int32_t i = 0; i < numRows; ++i) {
+        ++counts[findPartition(
+            bucketOffset(hashes[i]),
+            partitionBounds.data(),
+            partitionBounds.size())];
+      }
+    }
+  }
+  return counts;
+}
+
+template <bool ignoreNullKeys>
+uint8_t HashTable<ignoreNullKeys>::selectRadixPartitionBits() {
+  radixMaxBuildPartitionBytes_ = 0;
+  if (!isJoinBuild_ || !radixPartitioningRequested()) {
+    return 0;
+  }
+
+  uint8_t maxBits = radixMaxPartitionBits_;
+  while (maxBits > 0 && capacity_ < (uint64_t{1} << maxBits)) {
+    --maxBits;
+  }
+  if (maxBits == 0) {
+    radixMaxBuildPartitionBytes_ = estimateBuildPartitionBytes(numDistinct_);
+    return 0;
+  }
+
+  const auto fineCounts = buildRadixPartitionRowCounts(maxBits);
+  if (radixBuildPartitionMemoryCapBytes_ == 0) {
+    for (const auto rowCount : fineCounts) {
+      radixMaxBuildPartitionBytes_ = std::max(
+          radixMaxBuildPartitionBytes_, estimateBuildPartitionBytes(rowCount));
+    }
+    return maxBits;
+  }
+
+  for (uint8_t bits = 0; bits <= maxBits; ++bits) {
+    const auto numPartitions = uint32_t{1} << bits;
+    const auto partitionsPerGroup = uint32_t{1} << (maxBits - bits);
+    uint64_t maxPartitionBytes{0};
+    for (uint32_t partition = 0; partition < numPartitions; ++partition) {
+      uint64_t partitionRows{0};
+      const auto begin = partition * partitionsPerGroup;
+      const auto end = begin + partitionsPerGroup;
+      for (uint32_t i = begin; i < end; ++i) {
+        partitionRows += fineCounts[i];
+      }
+      maxPartitionBytes = std::max(
+          maxPartitionBytes, estimateBuildPartitionBytes(partitionRows));
+    }
+    if (maxPartitionBytes <= radixBuildPartitionMemoryCapBytes_) {
+      radixMaxBuildPartitionBytes_ = maxPartitionBytes;
+      return bits;
+    }
+    if (bits == maxBits) {
+      radixMaxBuildPartitionBytes_ = maxPartitionBytes;
+    }
+  }
+  return maxBits;
 }
 
 template <bool ignoreNullKeys>
@@ -1543,6 +1745,7 @@ void HashTable<ignoreNullKeys>::rehash(
     bool initNormalizedKeys,
     int8_t spillInputStartPartitionBit) {
   ++numRehashes_;
+  radixPartitionBits_ = selectRadixPartitionBits();
   if (canApplyRadixPartitionBuild()) {
     partitionedJoinBuild(1U << radixPartitionBits_, true);
     return;
@@ -1999,6 +2202,8 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
     bool dropDuplicates,
     folly::Executor* executor) {
   buildExecutor_ = executor;
+  radixPartitionBits_ = 0;
+  radixMaxBuildPartitionBytes_ = 0;
   radixPartitionBounds_.clear();
   parallelJoinBuildStats_ = {};
   if (dropDuplicates) {

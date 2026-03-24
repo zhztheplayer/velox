@@ -866,6 +866,50 @@ TEST_P(HashTableTest, regularHashingTableSize) {
   }
 }
 
+TEST_P(HashTableTest, radixProbeRespectsMemoryCap) {
+  static constexpr uint64_t kBuildCapBytes = 192ULL << 10;
+  static constexpr uint64_t kProbeCapBytes = 512;
+  auto rowType = ROW({"k0", "k1"}, {BIGINT(), VARCHAR()});
+
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  for (auto channel = 0; channel < rowType->size(); ++channel) {
+    keyHashers.emplace_back(
+        std::make_unique<VectorHasher>(rowType->childAt(channel), channel));
+  }
+
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers), {}, true, false, 1'000, pool());
+  table->enableRadixPartitioning(6, kBuildCapBytes, kProbeCapBytes);
+
+  std::vector<RowVectorPtr> buildBatches;
+  makeRows(4'000, 10, 0, rowType, buildBatches);
+  copyVectorsToTable(buildBatches, 0, table.get());
+  table->prepareJoinTable(
+      {},
+      BaseHashTable::kNoSpillInputStartPartitionBit,
+      1'000'000,
+      false,
+      executor_.get());
+
+  ASSERT_TRUE(table->radixPartitioningEnabled());
+  ASSERT_GT(table->radixPartitionBits(), 0);
+  ASSERT_LE(table->radixMaxBuildPartitionBytes(), kBuildCapBytes);
+
+  std::vector<RowVectorPtr> probeBatches;
+  makeRows(1'600, 2, 0, rowType, probeBatches);
+  for (const auto& batch : probeBatches) {
+    HashLookup lookup(table->hashers(), pool());
+    SelectivityVector rows(batch->size());
+    rows.setAll();
+    table->prepareForJoinProbe(lookup, batch, rows, true);
+    ASSERT_FALSE(lookup.rows.empty());
+    lookup.inputBytes = batch->retainedSize();
+    table->joinProbe(lookup);
+    ASSERT_GT(lookup.radixProbePasses, 1);
+    ASSERT_GT(lookup.radixProbeInputBytes, kProbeCapBytes);
+  }
+}
+
 TEST_P(HashTableTest, listJoinResultsSize) {
   baseString_ =
       "If you count carefully, you will notice there are exactly 105 characters"
