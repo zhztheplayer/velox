@@ -40,6 +40,18 @@ DEFINE_int64(
     batch_size,
     4096,
     "Maximum number of probe rows materialized at once.");
+DEFINE_int32(
+    radix_partition_bits,
+    0,
+    "Maximum radix partition bits for the custom case. Zero disables radix.");
+DEFINE_int64(
+    radix_build_partition_memory_cap,
+    0,
+    "Per-partition build-side memory cap in bytes for radix in the custom case.");
+DEFINE_int64(
+    radix_probe_memory_cap,
+    0,
+    "Per-pass probe-side memory cap in bytes for radix in the custom case.");
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -51,11 +63,23 @@ struct FixedProbeParams {
   std::string title;
   int64_t buildSize;
   int64_t probeSize;
+  uint8_t radixPartitionBits{0};
+  uint64_t radixBuildPartitionMemoryCapBytes{0};
+  uint64_t radixProbeMemoryCapBytes{0};
 
-  FixedProbeParams(std::string title, int64_t buildSize, int64_t probeSize)
+  FixedProbeParams(
+      std::string title,
+      int64_t buildSize,
+      int64_t probeSize,
+      uint8_t radixPartitionBits = 0,
+      uint64_t radixBuildPartitionMemoryCapBytes = 0,
+      uint64_t radixProbeMemoryCapBytes = 0)
       : title(std::move(title)),
         buildSize(buildSize),
-        probeSize(probeSize) {
+        probeSize(probeSize),
+        radixPartitionBits(radixPartitionBits),
+        radixBuildPartitionMemoryCapBytes(radixBuildPartitionMemoryCapBytes),
+        radixProbeMemoryCapBytes(radixProbeMemoryCapBytes) {
     VELOX_CHECK_GE(buildSize, 1, "buildSize must be positive");
     VELOX_CHECK_GE(probeSize, 1, "probeSize must be positive");
     VELOX_CHECK_GE(
@@ -65,7 +89,14 @@ struct FixedProbeParams {
   }
 
   std::string toString() const {
-    return fmt::format("{}: BuildRows={} ProbeRows={}", title, buildSize, probeSize);
+    return fmt::format(
+        "{}: BuildRows={} ProbeRows={} RadixBits={} BuildCap={} ProbeCap={}",
+        title,
+        buildSize,
+        probeSize,
+        radixPartitionBits,
+        radixBuildPartitionMemoryCapBytes,
+        radixProbeMemoryCapBytes);
   }
 };
 
@@ -81,16 +112,24 @@ struct FixedProbeResult {
   int64_t bucketBytes{0};
   int64_t rowBytes{0};
   BaseHashTable::HashMode mode{BaseHashTable::HashMode::kHash};
+  uint8_t radixPartitionBits{0};
+  uint64_t radixMaxBuildPartitionBytes{0};
+  uint64_t radixProbePasses{0};
+  uint64_t radixProbeInputBytes{0};
 
   std::string toString() const {
     std::stringstream out;
     out << params.toString() << '\n'
         << fmt::format(
-               "Hashed: {} Probed: {} Hit: {} Mode: {} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {}",
+               "Hashed: {} Probed: {} Hit: {} Mode: {} RadixBits={} RadixMaxBuildPartitionBytes={} RadixProbePasses={} RadixProbeInputBytes={} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {}",
                numHashed,
                numProbed,
                numHit,
                BaseHashTable::modeString(mode),
+               radixPartitionBits,
+               radixMaxBuildPartitionBytes,
+               radixProbePasses,
+               radixProbeInputBytes,
                hashClocks,
                probeClocks,
                bucketBytes,
@@ -127,6 +166,12 @@ class FixedProbeBenchmark {
         false,
         1'000,
         pool_.get());
+    if (params_.radixPartitionBits > 0) {
+      table_->enableRadixPartitioning(
+          params_.radixPartitionBits,
+          params_.radixBuildPartitionMemoryCapBytes,
+          params_.radixProbeMemoryCapBytes);
+    }
 
     populateRows(*build_, table_.get());
     std::vector<std::unique_ptr<BaseHashTable>> otherTables;
@@ -182,6 +227,12 @@ class FixedProbeBenchmark {
         SelectivityTimer timer(probeTime, 0);
         table_->joinProbe(*lookup);
       }
+      if (params_.radixPartitionBits > 0) {
+        VELOX_CHECK_GT(
+            table_->radixPartitionBits(),
+            0,
+            "Radix benchmark case did not activate radix partitioning");
+      }
       numProbed += batchSize;
 
       for (auto row = 0; row < batchSize; ++row) {
@@ -201,6 +252,10 @@ class FixedProbeBenchmark {
     result.bucketBytes = table_->allocatedBytes() - result.rowBytes;
     result.sizeBytes = table_->allocatedBytes();
     result.mode = table_->hashMode();
+    result.radixPartitionBits = table_->radixPartitionBits();
+    result.radixMaxBuildPartitionBytes = table_->radixMaxBuildPartitionBytes();
+    result.radixProbePasses = lookup->radixProbePasses;
+    result.radixProbeInputBytes = lookup->radixProbeInputBytes;
 
     return result;
   }
@@ -296,12 +351,21 @@ int main(int argc, char** argv) {
       FixedProbeParams("Probe1GTable128M", 1 << 27, 1 << 30),
       FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30),
       FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30),
+      FixedProbeParams(
+          "RadixProbe1GTable256K", 1 << 18, 1 << 30, 10, 1 << 16, 1 << 12),
+      FixedProbeParams(
+          "RadixProbe1GTable1M", 1 << 20, 1 << 30, 10, 1 << 18, 1 << 12),
+      FixedProbeParams(
+          "RadixProbe1GTable4M", 1 << 22, 1 << 30, 12, 1 << 18, 1 << 12),
   };
   if (FLAGS_build_size != 0) {
     params = {FixedProbeParams(
         "Custom",
         FLAGS_build_size,
-        FLAGS_probe_size)};
+        FLAGS_probe_size,
+        FLAGS_radix_partition_bits,
+        FLAGS_radix_build_partition_memory_cap,
+        FLAGS_radix_probe_memory_cap)};
   }
 
   for (const auto& param : params) {
