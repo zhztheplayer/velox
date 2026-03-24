@@ -148,6 +148,25 @@ add_test(
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+set(VELOX_EXEC_TEST_COMMON_DEPS
+    Boost::atomic
+    Boost::context
+    Boost::date_time
+    Boost::filesystem
+    Boost::program_options
+    Boost::thread
+    Boost::system
+    GTest::gtest
+    GTest::gtest_main
+    GTest::gmock
+    gflags::gflags
+    glog::glog
+    fmt::fmt)
+
+if(NOT VELOX_BUILD_SHARED)
+  list(APPEND VELOX_EXEC_TEST_COMMON_DEPS Folly::folly)
+endif()
+
 target_link_libraries(
   velox_exec_test
   velox_aggregates
@@ -175,20 +194,7 @@ target_link_libraries(
   velox_vector_fuzzer
   velox_writer_fuzzer
   velox_window
-  Boost::atomic
-  Boost::context
-  Boost::date_time
-  Boost::filesystem
-  Boost::program_options
-  Boost::thread
-  Boost::system
-  GTest::gtest
-  GTest::gtest_main
-  GTest::gmock
-  Folly::folly
-  gflags::gflags
-  glog::glog
-  fmt::fmt
+  ${VELOX_EXEC_TEST_COMMON_DEPS}
 )
 
 target_link_libraries(
@@ -212,20 +218,7 @@ target_link_libraries(
   velox_vector_fuzzer
   velox_presto_serializer
   velox_dwio_dwrf_writer
-  Boost::atomic
-  Boost::context
-  Boost::date_time
-  Boost::filesystem
-  Boost::program_options
-  Boost::thread
-  Boost::system
-  GTest::gtest
-  GTest::gtest_main
-  GTest::gmock
-  Folly::folly
-  gflags::gflags
-  glog::glog
-  fmt::fmt
+  ${VELOX_EXEC_TEST_COMMON_DEPS}
 )
 
 add_executable(
