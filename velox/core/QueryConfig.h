@@ -556,6 +556,17 @@ class QueryConfig {
   static constexpr const char* kHashProbeFinishEarlyOnEmptyBuild =
       "hash_probe_finish_early_on_empty_build";
 
+  /// Enables a prototype radix partitioned path for hash join build and probe.
+  /// Unsupported cases transparently fall back to the existing implementation.
+  static constexpr const char* kHashJoinRadixPartitioningEnabled =
+      "hash_join_radix_partitioning_enabled";
+
+  /// Number of radix bits to use when kHashJoinRadixPartitioningEnabled is
+  /// enabled. The number of partitions is 2 ^ bits. This is capped to 8 to
+  /// avoid excessive scratch memory usage in the prototype.
+  static constexpr const char* kHashJoinRadixPartitionBits =
+      "hash_join_radix_partition_bits";
+
   /// Whether hash probe can generate any dynamic filter (including Bloom
   /// filter) and push down to upstream operators.
   static constexpr const char* kHashProbeDynamicFilterPushdownEnabled =
@@ -1375,6 +1386,17 @@ class QueryConfig {
 
   bool hashProbeFinishEarlyOnEmptyBuild() const {
     return get<bool>(kHashProbeFinishEarlyOnEmptyBuild, false);
+  }
+
+  bool hashJoinRadixPartitioningEnabled() const {
+    return get<bool>(kHashJoinRadixPartitioningEnabled, false);
+  }
+
+  uint8_t hashJoinRadixPartitionBits() const {
+    constexpr uint8_t kDefaultBits = 4;
+    constexpr uint8_t kMaxBits = 8;
+    return std::min(
+        kMaxBits, get<uint8_t>(kHashJoinRadixPartitionBits, kDefaultBits));
   }
 
   bool hashProbeDynamicFilterPushdownEnabled() const {

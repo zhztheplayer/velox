@@ -270,6 +270,9 @@ void HashBuild::setupTable() {
     }
   }
   analyzeKeys_ = table_->hashMode() != BaseHashTable::HashMode::kHash;
+  if (queryConfig.hashJoinRadixPartitioningEnabled()) {
+    table_->enableRadixPartitioning(queryConfig.hashJoinRadixPartitionBits());
+  }
   if (abandonHashBuildDedupMinPct_ == 0) {
     // Building a HashTable without duplicates is disabled if
     // abandonBuildNoDupHashMinPct_ is 0.
@@ -1045,6 +1048,12 @@ void HashBuild::addRuntimeStats() {
   uint64_t asRange{0};
   uint64_t asDistinct{0};
   auto lockedStats = stats_.wlock();
+
+  if (table_->radixPartitioningEnabled()) {
+    lockedStats->addRuntimeStat(
+        std::string(BaseHashTable::kRadixPartitionCount),
+        RuntimeCounter(uint64_t{1} << table_->radixPartitionBits()));
+  }
 
   for (const auto& timing : table_->parallelJoinBuildStats().partitionTimings) {
     lockedStats->getOutputTiming.add(timing);

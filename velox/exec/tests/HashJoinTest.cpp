@@ -255,6 +255,46 @@ DEBUG_ONLY_TEST_P(MultiThreadedHashJoinTest, parallelJoinBuildCheck) {
   ASSERT_EQ(numDrivers_ == 1, !isParallelBuild);
 }
 
+DEBUG_ONLY_TEST_P(MultiThreadedHashJoinTest, radixPartitionedPrototype) {
+  std::atomic<bool> usedPartitionedBuild{false};
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashTable::parallelJoinBuild",
+      std::function<void(void*)>([&](void*) { usedPartitionedBuild = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .keyTypes({BIGINT(), VARCHAR()})
+      .probeVectors(1600, 5)
+      .buildVectors(1500, 5)
+      .config(core::QueryConfig::kHashJoinRadixPartitioningEnabled, "true")
+      .config(core::QueryConfig::kHashJoinRadixPartitionBits, "3")
+      .referenceQuery(
+          "SELECT t_k0, t_k1, t_data, u_k0, u_k1, u_data FROM t, u WHERE t_k0 = u_k0 AND t_k1 = u_k1")
+      .injectSpill(false)
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        bool sawRadixStat = false;
+        for (const auto& pipeline : task->taskStats().pipelineStats) {
+          for (const auto& op : pipeline.operatorStats) {
+            if (op.operatorType != OperatorType::kHashBuild) {
+              continue;
+            }
+            auto it = op.runtimeStats.find(
+                std::string(BaseHashTable::kRadixPartitionCount));
+            if (it == op.runtimeStats.end()) {
+              continue;
+            }
+            sawRadixStat = true;
+            ASSERT_EQ(it->second.sum, 8);
+          }
+        }
+        ASSERT_TRUE(sawRadixStat);
+      })
+      .run();
+
+  ASSERT_TRUE(usedPartitionedBuild);
+}
+
 DEBUG_ONLY_TEST_P(
     MultiThreadedHashJoinTest,
     raceBetweenTaskTerminateAndTableBuild) {

@@ -167,6 +167,8 @@ class BaseHashTable {
       "hashtable.vectorHasherMergeCpuNanos"};
   static constexpr std::string_view kHashTableCacheHit{"hashtable.cacheHit"};
   static constexpr std::string_view kHashTableCacheMiss{"hashtable.cacheMiss"};
+  static constexpr std::string_view kRadixPartitionCount{
+      "hashtable.radixPartitionCount"};
 
   /// Returns the string of the given 'mode'.
   static std::string modeString(HashMode mode);
@@ -496,6 +498,18 @@ class BaseHashTable {
       int32_t columnIndex,
       const VectorPtr& result) = 0;
 
+  void enableRadixPartitioning(uint8_t bits) {
+    radixPartitionBits_ = bits;
+  }
+
+  bool radixPartitioningEnabled() const {
+    return radixPartitionBits_ > 0;
+  }
+
+  uint8_t radixPartitionBits() const {
+    return radixPartitionBits_;
+  }
+
  protected:
   static FOLLY_ALWAYS_INLINE size_t tableSlotSize() {
     // Each slot is 8 bytes.
@@ -509,6 +523,7 @@ class BaseHashTable {
 
   std::vector<std::unique_ptr<VectorHasher>> hashers_;
   std::unique_ptr<RowContainer> rows_;
+  uint8_t radixPartitionBits_{0};
 
   ParallelJoinBuildStats parallelJoinBuildStats_;
   CpuWallTiming vectorHasherMergeTiming_;
@@ -969,14 +984,13 @@ class HashTable : public BaseHashTable {
   //    than a pre-defined threshold: 1000 for now.
   bool canApplyParallelJoinBuild() const;
 
-  // Builds a join table with '1 + otherTables_.size()' independent
-  // threads using 'executor_'. First all RowContainers get partition
-  // numbers assigned to each row. Next, all threads pick all rows
-  // assigned to their thread-specific partition and insert these. If
-  // a row would overflow past the end of its partition it is added to
-  // a set of overflow rows that are sequentially inserted after all
-  // else.
-  void parallelJoinBuild();
+  bool canApplyRadixPartitionBuild() const;
+
+  // Builds a join table one radix partition at a time. This reuses the
+  // existing parallel join build path when an executor is available, but also
+  // allows a sequential prototype path when the table is configured with
+  // explicit radix partitions.
+  void partitionedJoinBuild(uint8_t numPartitions, bool keepPartitionBounds);
 
   // Inserts the rows in 'partition' from this and 'otherTables' into 'this'.
   // The rows that would have gone past the end of the partition are returned in
@@ -1216,6 +1230,9 @@ class HashTable : public BaseHashTable {
   // range of partition i starts at [i] and ends at [i +1]. Bounds are multiple
   // of cache line  size.
   raw_vector<PartitionBoundIndexType> buildPartitionBounds_;
+
+  // Persisted partition bounds for the radix probe prototype.
+  std::vector<PartitionBoundIndexType> radixPartitionBounds_;
 
   // Executor for parallelizing hash join build. This may be the
   // executor for Drivers. If this executor is indefinitely taken by

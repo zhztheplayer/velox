@@ -27,6 +27,16 @@
 using facebook::velox::common::testutil::TestValue;
 
 namespace facebook::velox::exec {
+// Returns an index into 'buildPartitionBounds_' given an index into tags of the
+// HashTable.
+int32_t findPartition(
+    PartitionBoundIndexType index,
+    const PartitionBoundIndexType* bounds,
+    int32_t numPartitions) {
+  auto* bound = std::upper_bound(bounds + 1, bounds + numPartitions, index);
+  VELOX_CHECK(bound != bounds + numPartitions);
+  return std::distance(bounds, bound) - 1;
+}
 
 // static
 std::string BaseHashTable::modeString(HashMode mode) {
@@ -608,6 +618,33 @@ void HashTable<ignoreNullKeys>::arrayGroupProbe(HashLookup& lookup) {
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::joinProbe(HashLookup& lookup) {
   incrementProbes(lookup.rows.size());
+  if (!radixPartitionBounds_.empty() && lookup.rows.size() > 1) {
+    std::vector<vector_size_t> partitionStarts(
+        radixPartitionBounds_.size(), 0);
+    for (const auto row : lookup.rows) {
+      ++partitionStarts[findPartition(
+          bucketOffset(lookup.hashes[row]),
+          radixPartitionBounds_.data(),
+          radixPartitionBounds_.size())];
+    }
+
+    vector_size_t nextStart{0};
+    for (auto& partitionStart : partitionStarts) {
+      const auto count = partitionStart;
+      partitionStart = nextStart;
+      nextStart += count;
+    }
+
+    raw_vector<vector_size_t> partitionedRows(lookup.rows.size(), pool_);
+    for (const auto row : lookup.rows) {
+      auto& partitionStart = partitionStarts[findPartition(
+          bucketOffset(lookup.hashes[row]),
+          radixPartitionBounds_.data(),
+          radixPartitionBounds_.size())];
+      partitionedRows[partitionStart++] = row;
+    }
+    lookup.rows = std::move(partitionedRows);
+  }
   if (hashMode_ == HashMode::kArray) {
     arrayJoinProbe(lookup);
     return;
@@ -992,17 +1029,26 @@ bool HashTable<ignoreNullKeys>::canApplyParallelJoinBuild() const {
 }
 
 template <bool ignoreNullKeys>
-void HashTable<ignoreNullKeys>::parallelJoinBuild() {
+bool HashTable<ignoreNullKeys>::canApplyRadixPartitionBuild() const {
+  if (!isJoinBuild_ || radixPartitionBits_ == 0) {
+    return false;
+  }
+  if (hashMode_ == HashMode::kArray) {
+    return false;
+  }
+  const auto numPartitions = uint32_t{1} << radixPartitionBits_;
+  return numPartitions > 1 && capacity_ >= numPartitions;
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::partitionedJoinBuild(
+    uint8_t numPartitions,
+    bool keepPartitionBounds) {
   process::TraceContext trace("HashTable::parallelJoinBuild");
   TestValue::adjust(
       "facebook::velox::exec::HashTable::parallelJoinBuild", rows_->pool());
-  VELOX_CHECK_LE(1 + otherTables_.size(), std::numeric_limits<uint8_t>::max());
-  const uint8_t numPartitions = 1 + otherTables_.size();
-  VELOX_CHECK_GT(
-      capacity_ / numPartitions,
-      minTableSizeForParallelJoinBuild_,
-      "Less than {} entries per partition for parallel build",
-      minTableSizeForParallelJoinBuild_);
+  VELOX_CHECK_GT(numPartitions, 0);
+  VELOX_CHECK_LE(numPartitions, std::numeric_limits<uint8_t>::max());
   buildPartitionBounds_.resize(numPartitions + 1);
   // Pad the tail of buildPartitionBounds_ to max int.
   std::fill(
@@ -1038,12 +1084,18 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
     syncWorkItems(buildSteps, parallelJoinBuildStats_.buildTimings, false);
     syncWorkItems(
         bloomFilterPartitionSteps,
-        parallelJoinBuildStats_.bloomFilterPartitionTimings,
-        false);
+      parallelJoinBuildStats_.bloomFilterPartitionTimings,
+      false);
     syncWorkItems(
         bloomFilterBuildSteps,
         parallelJoinBuildStats_.bloomFilterBuildTimings,
         false);
+    if (keepPartitionBounds) {
+      radixPartitionBounds_.assign(
+          buildPartitionBounds_.begin(), buildPartitionBounds_.end());
+    } else {
+      radixPartitionBounds_.clear();
+    }
     // Release the partition bounds to reduce memory usage.
     buildPartitionBounds_ = raw_vector<PartitionBoundIndexType>(pool_);
   });
@@ -1058,6 +1110,11 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
   const auto getTable = [this](size_t i) INLINE_LAMBDA {
     return i == 0 ? this : otherTables_[i - 1].get();
   };
+
+  const uint8_t numTables = 1 + otherTables_.size();
+  for (auto i = 0; i < numTables; ++i) {
+    getTable(i)->numParallelBuildRows_ = 0;
+  }
 
   const auto runStep = [&](auto& steps, auto&& work, bool runInCurrentThread) {
     auto step = std::make_shared<AsyncSource<bool>>([work = std::move(work)] {
@@ -1078,23 +1135,21 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
   // This step can involve large memory allocations, so there is a chance of
   // OOMs here. Do it before any async work is started to reduce the chances of
   // concurrency issues.
-  rowPartitions.reserve(numPartitions);
-  for (auto i = 0; i < numPartitions; ++i) {
+  rowPartitions.reserve(numTables);
+  for (auto i = 0; i < numTables; ++i) {
     auto* table = getTable(i);
     rowPartitions.push_back(table->rows()->createRowPartitions(*rows_->pool()));
   }
 
   // The parallel table partitioning step.
-  for (auto i = 0; i < numPartitions; ++i) {
+  for (auto i = 0; i < numTables; ++i) {
     auto* table = getTable(i);
-    bool last = i == numPartitions - 1;
+    bool last = buildExecutor_ == nullptr || i == numTables - 1;
     runStep(
         partitionSteps,
         [this, table, rawRowPartitions = rowPartitions[i].get()] {
           partitionRows(*table, *rawRowPartitions);
         },
-        // run last partition on current thread to avoid wasting current thread
-        // on just waiting
         last);
   }
   syncWorkItems(partitionSteps, parallelJoinBuildStats_.partitionTimings, true);
@@ -1102,14 +1157,12 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
   // The parallel table building step.
   std::vector<std::vector<char*>> overflowPerPartition(numPartitions);
   for (auto i = 0; i < numPartitions; ++i) {
-    bool last = i == numPartitions - 1;
+    bool last = buildExecutor_ == nullptr || i == numPartitions - 1;
     runStep(
         buildSteps,
         [this, i, &overflowPerPartition, &rowPartitions] {
           buildJoinPartition(i, rowPartitions, overflowPerPartition[i]);
         },
-        // run last partition on current thread to avoid wasting current thread
-        // on just waiting
         last);
   }
   syncWorkItems(buildSteps, parallelJoinBuildStats_.buildTimings, true);
@@ -1126,8 +1179,8 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
       auto filter = std::make_shared<common::BigintValuesUsingBloomFilter>(
           numDistinct_, false);
       hashers_[i]->setBloomFilter(filter);
-      for (auto j = 0; j < numPartitions; ++j) {
-        bool last = j == numPartitions - 1;
+      for (auto j = 0; j < numTables; ++j) {
+        bool last = buildExecutor_ == nullptr || j == numTables - 1;
         auto* rows = getTable(j)->rows();
         rowPartitions[j]->reset();
         runStep(
@@ -1146,8 +1199,6 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
                   numBloomFilterPartitions,
                   *rowPartitions);
             },
-            // run last partition on current thread to avoid wasting current
-            // thread on just waiting
             last);
       }
       syncWorkItems(
@@ -1155,14 +1206,13 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
           parallelJoinBuildStats_.bloomFilterPartitionTimings,
           true);
       for (auto j = 0; j < numBloomFilterPartitions; ++j) {
-        bool last = j == numBloomFilterPartitions - 1;
+        bool last =
+            buildExecutor_ == nullptr || j == numBloomFilterPartitions - 1;
         runStep(
             bloomFilterBuildSteps,
             [this, i, j, &rowPartitions] {
               buildBloomFilterPartition(i, j, rowPartitions);
             },
-            // run last partition on current thread to avoid wasting current
-            // thread on just waiting
             last);
       }
       syncWorkItems(
@@ -1180,33 +1230,13 @@ void HashTable<ignoreNullKeys>::parallelJoinBuild() {
         folly::Range<char**>(overflows.data(), overflows.size()),
         false,
         hashes));
-    auto table = i == 0 ? this : otherTables_[i - 1].get();
     insertForJoin(overflows.data(), hashes.data(), overflows.size(), nullptr);
+  }
+  for (auto i = 0; i < numTables; ++i) {
+    auto* table = getTable(i);
     VELOX_CHECK_EQ(table->rows()->numRows(), table->numParallelBuildRows_);
   }
 }
-
-namespace {
-// Returns an index into 'buildPartitionBounds_' given an index into tags of the
-// HashTable.
-int32_t findPartition(
-    PartitionBoundIndexType index,
-    const PartitionBoundIndexType* bounds,
-    int32_t numPartitions) {
-  // The partition bounds are padded to batch size.
-  constexpr int32_t kBatch = xsimd::batch<PartitionBoundIndexType>::size;
-  auto indexVector = xsimd::batch<PartitionBoundIndexType>::broadcast(index);
-  for (auto i = 1; i < numPartitions; i += kBatch) {
-    auto bits = simd::toBitMask(
-        indexVector <
-        xsimd::batch<PartitionBoundIndexType>::load_unaligned(bounds + i));
-    if (bits) {
-      return i + __builtin_ctz(bits) - 1;
-    }
-  }
-  VELOX_UNREACHABLE("Partition index out of range");
-}
-} // namespace
 
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::partitionRows(
@@ -1220,11 +1250,6 @@ void HashTable<ignoreNullKeys>::partitionRows(
              &iter, kHashBatchSize, RowContainer::kUnlimited, rows.data())) {
     VELOX_CHECK(
         hashRows(folly::Range<char**>(rows.data(), numRows), true, hashes));
-    VELOX_DCHECK_EQ(
-        0,
-        buildPartitionBounds_.capacity() %
-            xsimd::batch<PartitionBoundIndexType>::size,
-        "partition bounds must be padded to SIMD width");
     for (auto i = 0; i < numRows; ++i) {
       auto index = bucketOffset(hashes[i]);
       partitions[i] = findPartition(
@@ -1518,8 +1543,13 @@ void HashTable<ignoreNullKeys>::rehash(
     bool initNormalizedKeys,
     int8_t spillInputStartPartitionBit) {
   ++numRehashes_;
+  if (canApplyRadixPartitionBuild()) {
+    partitionedJoinBuild(1U << radixPartitionBits_, true);
+    return;
+  }
   if (canApplyParallelJoinBuild()) {
-    parallelJoinBuild();
+    partitionedJoinBuild(
+        static_cast<uint8_t>(1 + otherTables_.size()), false);
     return;
   }
   raw_vector<uint64_t> hashes(pool_);
@@ -1969,6 +1999,8 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
     bool dropDuplicates,
     folly::Executor* executor) {
   buildExecutor_ = executor;
+  radixPartitionBounds_.clear();
+  parallelJoinBuildStats_ = {};
   if (dropDuplicates) {
     if (table_ != nullptr) {
       // Reset table_ and capacity_ to trigger rehash.

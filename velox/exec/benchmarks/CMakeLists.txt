@@ -105,6 +105,15 @@ target_link_libraries(
   Folly::follybenchmark
 )
 
+add_executable(velox_radix_hash_join_prototype RadixHashJoinPrototype.cpp)
+
+target_link_libraries(
+  velox_radix_hash_join_prototype
+  velox_exec
+  velox_vector_test_lib
+  fmt::fmt
+)
+
 if(${VELOX_ENABLE_PARQUET})
   add_executable(velox_sort_benchmark RowContainerSortBenchmark.cpp)
 
