@@ -61,7 +61,7 @@ struct FixedProbeParams {
       std::string title,
       int64_t buildSize,
       int64_t probeSize,
-      uint8_t numRadixBits = 0)
+      uint8_t numRadixBits)
       : title(std::move(title)),
         buildSize(buildSize),
         probeSize(probeSize),
@@ -85,7 +85,7 @@ struct FixedProbeParams {
 };
 
 struct FixedProbeResult {
-  FixedProbeParams params{"default", 1, 2};
+  FixedProbeParams params{"default", 1, 2, 0};
   int64_t numHashed{0};
   int64_t numProbed{0};
   int64_t numHit{0};
@@ -265,7 +265,7 @@ class FixedProbeBenchmark {
   FlatVectorPtr<int64_t> probeKeys_;
   std::vector<char*> buildRows_;
   std::unique_ptr<HashTable<true>> table_;
-  FixedProbeParams params_{"default", 1, 2};
+  FixedProbeParams params_{"default", 1, 2, 0};
 };
 
 void combineResults(
