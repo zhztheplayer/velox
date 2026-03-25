@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "velox/exec/HashBuild.h"
+#include "velox/exec/JoinTableLookup.h"
 #include "velox/exec/HashTable.h"
 #include "velox/exec/Operator.h"
 #include "velox/exec/ProbeOperatorState.h"
@@ -47,7 +48,7 @@ class HashProbe : public Operator {
         noMoreSpillInput_ || input_ != nullptr) {
       return false;
     }
-    if (table_) {
+    if (currentHashTable() != nullptr) {
       return true;
     }
     // NOTE: if we can't apply dynamic filtering, then we can start early to
@@ -107,7 +108,7 @@ class HashProbe : public Operator {
   }
 
   std::shared_ptr<BaseHashTable> testingTable() const {
-    return table_;
+    return currentHashTableShared();
   }
 
   ProbeOperatorState testingState() const {
@@ -127,6 +128,9 @@ class HashProbe : public Operator {
 
   void setRunning();
   void checkRunning() const;
+  BaseHashTable* currentHashTable();
+  const BaseHashTable* currentHashTable() const;
+  std::shared_ptr<BaseHashTable> currentHashTableShared() const;
   bool isRunning() const;
   bool isWaitingForPeers() const;
 
@@ -345,8 +349,8 @@ class HashProbe : public Operator {
   // restore. Also note that the spilled partition at build side must not be
   // empty.
   bool emptyBuildSide() const {
-    return table_->numDistinct() == 0 && inputSpillPartitionSet_.empty() &&
-        spillInputPartitionIds_.empty();
+    return currentHashTable()->numDistinct() == 0 &&
+        inputSpillPartitionSet_.empty() && spillInputPartitionIds_.empty();
   }
 
   // Find the peer hash probe operators in the same pipeline.
@@ -439,9 +443,10 @@ class HashProbe : public Operator {
 
   std::vector<std::unique_ptr<VectorHasher>> hashers_;
 
-  // Current working hash table that is shared between other HashProbes in other
-  // Drivers of the same pipeline.
-  std::shared_ptr<BaseHashTable> table_;
+  // Current working hash table lookup that is shared between other HashProbes
+  // in other Drivers of the same pipeline. The current implementation unwraps
+  // the single backing table on demand instead of storing a second owner here.
+  std::shared_ptr<JoinTableLookup> tableLookup_;
 
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};

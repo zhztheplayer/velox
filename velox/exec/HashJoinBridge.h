@@ -17,6 +17,7 @@
 
 #include "velox/exec/HashBitRange.h"
 #include "velox/exec/HashTable.h"
+#include "velox/exec/JoinTableLookup.h"
 #include "velox/exec/JoinBridge.h"
 #include "velox/exec/MemoryReclaimer.h"
 #include "velox/exec/Spill.h"
@@ -52,10 +53,11 @@ class HashJoinBridge : public JoinBridge {
 
   /// Invoked by the build operator to set the built hash table.
   /// 'spillPartitionSet' contains the spilled partitions while building
-  /// 'table' which only applies if the disk spilling is enabled.
-  /// Accepts both unique_ptr (regular joins) and shared_ptr (broadcast joins).
+  /// the table which only applies if the disk spilling is enabled. The bridge
+  /// only sees the lightweight routing API; callers decide how hash values map
+  /// to backing tables before handing the result to probe.
   void setHashTable(
-      std::shared_ptr<BaseHashTable> table,
+      std::shared_ptr<JoinTableLookup> tableLookup,
       SpillPartitionSet spillPartitionSet,
       bool hasNullKeys,
       HashJoinTableSpillFunc&& tableSpillFunc);
@@ -78,14 +80,16 @@ class HashJoinBridge : public JoinBridge {
   /// the input and without finishing building the hash table.
   struct HashBuildResult {
     HashBuildResult(
-        std::shared_ptr<BaseHashTable> _table,
+        std::shared_ptr<JoinTableLookup> _tableLookup,
         std::optional<SpillPartitionId> _restoredPartitionId,
         SpillPartitionIdSet _spillPartitionIds,
         bool _hasNullKeys)
         : hasNullKeys(_hasNullKeys),
-          table(std::move(_table)),
+          tableLookup(std::move(_tableLookup)),
           restoredPartitionId(std::move(_restoredPartitionId)),
-          spillPartitionIds(std::move(_spillPartitionIds)) {}
+          spillPartitionIds(std::move(_spillPartitionIds)) {
+      VELOX_CHECK_NOT_NULL(tableLookup);
+    }
 
     HashBuildResult() : hasNullKeys(true) {}
 
@@ -95,7 +99,7 @@ class HashJoinBridge : public JoinBridge {
         : hasNullKeys(_hasNullKeys), waveTable(std::move(_table)) {}
 
     bool hasNullKeys;
-    std::shared_ptr<BaseHashTable> table;
+    std::shared_ptr<JoinTableLookup> tableLookup;
 
     std::shared_ptr<wave::HashTableHolder> waveTable;
 

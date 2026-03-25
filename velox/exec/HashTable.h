@@ -353,6 +353,13 @@ class BaseHashTable {
       bool dropDuplicates = false,
       folly::Executor* executor = nullptr) = 0;
 
+  virtual void prepareJoinTable(
+      std::vector<std::shared_ptr<BaseHashTable>> tables,
+      int8_t spillInputStartPartitionBit,
+      size_t vectorHasherMaxNumDistinct,
+      bool dropDuplicates = false,
+      folly::Executor* executor = nullptr) = 0;
+
   /// The hash table used for join build in left semi and anti join may not
   /// retain duplicate join keys when allowDuplicates_ is false. This is
   /// achieved by constructing the hash table in the addInput phase to eliminate
@@ -702,6 +709,13 @@ class HashTable : public BaseHashTable {
   /// and VectorHashers and decides the hash mode and representation.
   void prepareJoinTable(
       std::vector<std::unique_ptr<BaseHashTable>> tables,
+      int8_t spillInputStartPartitionBit,
+      size_t vectorHasherMaxNumDistinct,
+      bool dropDuplicates = false,
+      folly::Executor* executor = nullptr) override;
+
+  void prepareJoinTable(
+      std::vector<std::shared_ptr<BaseHashTable>> tables,
       int8_t spillInputStartPartitionBit,
       size_t vectorHasherMaxNumDistinct,
       bool dropDuplicates = false,
@@ -1193,7 +1207,7 @@ class HashTable : public BaseHashTable {
   HashMode hashMode_ = HashMode::kArray;
   // Owns the memory of multiple build side hash join tables that are
   // combined into a single probe hash table.
-  std::vector<std::unique_ptr<HashTable<ignoreNullKeys>>> otherTables_;
+  std::vector<std::shared_ptr<HashTable<ignoreNullKeys>>> otherTables_;
   // Statistics maintained if kTrackLoads is set.
 
   // Flags indicate whether the same column in all build-side join hash tables

@@ -20,6 +20,14 @@
 namespace facebook::velox::exec {
 namespace {
 static const char* kSpillProbedFlagColumnName = "__probedFlag";
+
+std::shared_ptr<BaseHashTable> singleHashTable(
+    const std::shared_ptr<JoinTableLookup>& tableLookup) {
+  auto singleTableLookup =
+      std::dynamic_pointer_cast<SingleJoinTableLookup>(tableLookup);
+  VELOX_CHECK_NOT_NULL(singleTableLookup);
+  return singleTableLookup->hashTable();
+}
 }
 
 RowTypePtr hashJoinTableType(
@@ -75,16 +83,17 @@ void HashJoinBridge::reclaim() {
   if (tableSpillFunc_ == nullptr) {
     return;
   }
-  if (!buildResult_.has_value() || buildResult_->table == nullptr ||
-      buildResult_->table->numDistinct() == 0) {
+  if (!buildResult_.has_value() || buildResult_->tableLookup == nullptr) {
     return;
   }
-  VELOX_CHECK(buildResult_.has_value());
-  VELOX_CHECK_NOT_NULL(buildResult_->table);
+  auto table = singleHashTable(buildResult_->tableLookup);
+  if (table->numDistinct() == 0) {
+    return;
+  }
 
-  auto spillPartitionSet = tableSpillFunc_(buildResult_->table);
+  auto spillPartitionSet = tableSpillFunc_(table);
   const auto spillPartitionIdSet = toSpillPartitionIdSet(spillPartitionSet);
-  buildResult_->table->clear(true);
+  table->clear(true);
 
   appendSpilledHashTablePartitionsLocked(std::move(spillPartitionSet));
   buildResult_->spillPartitionIds = spillPartitionIdSet;
@@ -216,11 +225,17 @@ SpillPartitionSet spillHashJoinTable(
 }
 
 void HashJoinBridge::setHashTable(
-    std::shared_ptr<BaseHashTable> table,
+    std::shared_ptr<JoinTableLookup> tableLookup,
     SpillPartitionSet spillPartitionSet,
     bool hasNullKeys,
     HashJoinTableSpillFunc&& tableSpillFunc) {
-  VELOX_CHECK_NOT_NULL(table, "setHashTable called with null table");
+  VELOX_CHECK_NOT_NULL(tableLookup, "setHashTable called with null table lookup");
+  auto singleTableLookup =
+      std::dynamic_pointer_cast<SingleJoinTableLookup>(tableLookup);
+  // The initial lookup implementation still routes to a single table. Unwrap
+  // it here to preserve the existing spill and validation behavior.
+  VELOX_CHECK_NOT_NULL(singleTableLookup);
+  const auto& table = singleTableLookup->hashTable();
   VELOX_CHECK(table->numDistinct() == 0 || spillPartitionSet.empty());
   std::vector<ContinuePromise> promises;
   {
@@ -234,7 +249,7 @@ void HashJoinBridge::setHashTable(
     const auto spillPartitionIdSet = toSpillPartitionIdSet(spillPartitionSet);
     appendSpilledHashTablePartitionsLocked(std::move(spillPartitionSet));
     buildResult_ = HashBuildResult(
-        std::move(table),
+        std::move(tableLookup),
         std::move(restoringSpillPartitionId_),
         spillPartitionIdSet,
         hasNullKeys);
@@ -339,7 +354,7 @@ void HashJoinBridge::probeFinished(bool restart) {
       // reused, hash build is not needed. Directly set 'buildResult_',
       // bypassing hash build. Hence do not notify the build operators.
       VELOX_CHECK(!spillPartitionSet_.hasNext());
-      buildResult_->table->clear(true);
+      singleHashTable(buildResult_->tableLookup)->clear(true);
       buildResult_->restoredPartitionId = std::nullopt;
       buildResult_->spillPartitionIds =
           toSpillPartitionIdSet(spillPartitionSet_.spillPartitions());

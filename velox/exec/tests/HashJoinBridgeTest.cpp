@@ -18,6 +18,7 @@
 #include "velox/common/file/FileSystems.h"
 #include "velox/common/testutil/TempDirectoryPath.h"
 #include "velox/exec/HashTable.h"
+#include "velox/exec/JoinTableLookup.h"
 #include "velox/exec/Spill.h"
 
 using namespace facebook::velox;
@@ -100,6 +101,15 @@ class HashJoinBridgeTest : public testing::Test,
         std::move(keyHashers), {}, true, false, 1'000, pool_.get());
   }
 
+  std::shared_ptr<JoinTableLookup> createFakeHashTableLookup(
+      BaseHashTable** rawTable = nullptr) {
+    auto table = std::shared_ptr<BaseHashTable>(createFakeHashTable().release());
+    if (rawTable != nullptr) {
+      *rawTable = table.get();
+    }
+    return std::make_shared<SingleJoinTableLookup>(std::move(table));
+  }
+
   std::vector<ContinueFuture> createEmptyFutures(int32_t count) {
     std::vector<ContinueFuture> futures;
     futures.reserve(count);
@@ -174,7 +184,7 @@ TEST_P(HashJoinBridgeTest, withoutSpill) {
     // Can't call any other APIs except addBuilder() before start a join bridge
     // first.
     VELOX_ASSERT_THROW(
-        joinBridge->setHashTable(createFakeHashTable(), {}, false, nullptr),
+        joinBridge->setHashTable(createFakeHashTableLookup(), {}, false, nullptr),
         "");
     VELOX_ASSERT_THROW(joinBridge->setAntiJoinHasNullKeys(), "");
     VELOX_ASSERT_THROW(joinBridge->probeFinished(), "");
@@ -208,11 +218,10 @@ TEST_P(HashJoinBridgeTest, withoutSpill) {
       joinBridge->setAntiJoinHasNullKeys();
       VELOX_ASSERT_THROW(joinBridge->setAntiJoinHasNullKeys(), "");
     } else {
-      auto table = createFakeHashTable();
-      rawTable = table.get();
-      joinBridge->setHashTable(std::move(table), {}, false, nullptr);
+      joinBridge->setHashTable(
+          createFakeHashTableLookup(&rawTable), {}, false, nullptr);
       VELOX_ASSERT_THROW(
-          joinBridge->setHashTable(createFakeHashTable(), {}, false, nullptr),
+          joinBridge->setHashTable(createFakeHashTableLookup(), {}, false, nullptr),
           "");
     }
     ASSERT_TRUE(helper.buildResult().has_value());
@@ -229,13 +238,16 @@ TEST_P(HashJoinBridgeTest, withoutSpill) {
       ASSERT_FALSE(futures[i].valid());
       if (hasNullKeys) {
         ASSERT_TRUE(tableOr.value().hasNullKeys);
-        ASSERT_TRUE(tableOr.value().table == nullptr);
+        ASSERT_TRUE(tableOr.value().tableLookup == nullptr);
         ASSERT_FALSE(tableOr.value().restoredPartitionId.has_value());
         ASSERT_TRUE(tableOr.value().spillPartitionIds.empty());
       } else {
         ASSERT_FALSE(tableOr.value().hasNullKeys);
-        ASSERT_FALSE(tableOr.value().table == nullptr);
-        ASSERT_EQ(tableOr.value().table.get(), rawTable);
+        ASSERT_FALSE(tableOr.value().tableLookup == nullptr);
+        auto singleTableLookup = std::dynamic_pointer_cast<SingleJoinTableLookup>(
+            tableOr.value().tableLookup);
+        ASSERT_NE(singleTableLookup, nullptr);
+        ASSERT_EQ(singleTableLookup->hashTable().get(), rawTable);
         ASSERT_FALSE(tableOr.value().restoredPartitionId.has_value());
         ASSERT_TRUE(tableOr.value().spillPartitionIds.empty());
       }
@@ -325,13 +337,14 @@ TEST_P(HashJoinBridgeTest, withSpill) {
         if (oneIn(2)) {
           spillPartitionIdSet = toSpillPartitionIdSet(spillPartitionSet);
           joinBridge->setHashTable(
-              createFakeHashTable(),
+              createFakeHashTableLookup(),
               std::move(spillPartitionSet),
               false,
               nullptr);
         } else {
           spillByProber = !spillPartitionSet.empty();
-          joinBridge->setHashTable(createFakeHashTable(), {}, false, nullptr);
+          joinBridge->setHashTable(
+              createFakeHashTableLookup(), {}, false, nullptr);
         }
         hasMoreSpill = numSpilledPartitions > numRestoredPartitions;
       }
@@ -343,10 +356,10 @@ TEST_P(HashJoinBridgeTest, withSpill) {
         ASSERT_TRUE(tableOr.has_value());
         if (!hasMoreSpill && testData.endWithNull) {
           ASSERT_TRUE(tableOr.value().hasNullKeys);
-          ASSERT_TRUE(tableOr.value().table == nullptr);
+          ASSERT_TRUE(tableOr.value().tableLookup == nullptr);
         } else {
           ASSERT_FALSE(tableOr.value().hasNullKeys);
-          ASSERT_TRUE(tableOr.value().table != nullptr);
+          ASSERT_TRUE(tableOr.value().tableLookup != nullptr);
           ASSERT_EQ(tableOr.value().spillPartitionIds, spillPartitionIdSet);
         }
       }
@@ -467,13 +480,13 @@ TEST_P(HashJoinBridgeTest, multiThreading) {
                 auto spillPartitionSet =
                     makeFakeSpillPartitionSet(restoringPartitionId);
                 joinBridge->setHashTable(
-                    createFakeHashTable(),
+                    createFakeHashTableLookup(),
                     std::move(spillPartitionSet),
                     false,
                     nullptr);
               } else {
                 joinBridge->setHashTable(
-                    createFakeHashTable(), {}, false, nullptr);
+                    createFakeHashTableLookup(), {}, false, nullptr);
               }
             }
             for (auto& promise : promises) {
@@ -510,7 +523,7 @@ TEST_P(HashJoinBridgeTest, multiThreading) {
             ASSERT_TRUE(tableOr.has_value());
           }
           if (!tableOr.value().hasNullKeys) {
-            ASSERT_TRUE(tableOr.value().table != nullptr);
+            ASSERT_TRUE(tableOr.value().tableLookup != nullptr);
             for (const auto& id : tableOr.value().spillPartitionIds) {
               ASSERT_FALSE(spillPartitionIdSet.contains(id));
               spillPartitionIdSet.insert(id);

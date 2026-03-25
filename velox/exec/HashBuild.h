@@ -18,6 +18,7 @@
 #include <string_view>
 
 #include "velox/exec/HashJoinBridge.h"
+#include "velox/exec/JoinTableLookup.h"
 #include "velox/exec/HashTable.h"
 #include "velox/exec/HashTableCache.h"
 #include "velox/exec/Operator.h"
@@ -127,6 +128,10 @@ class HashBuild final : public Operator {
   // Returns true if the cached table was used (build can be skipped).
   // Returns false if we need to build the table (cache miss).
   bool getHashTableFromCache();
+
+  BaseHashTable* currentHashTable();
+  const BaseHashTable* currentHashTable() const;
+  std::shared_ptr<BaseHashTable> currentHashTableShared() const;
 
   // Called when waiting for a cached hash table from another task.
   // Returns true if the cached table was received and noMoreInput was called.
@@ -309,21 +314,23 @@ class HashBuild final : public Operator {
   // The row type used for hash table build and disk spilling.
   RowTypePtr tableType_;
 
-  // Used to serialize access to internal state including 'table_' and
+  // Used to serialize access to internal state including 'tableLookup_' and
   // 'spiller_'. This is only required when variables are accessed
   // concurrently, that is, when a thread tries to close the operator while
   // another thread is building the hash table. Refer to 'close()' and
   // finishHashBuild()' for more details.
   std::mutex mutex_;
 
-  // Indicates if the intermediate state ('table_' and 'spiller_') has
+  // Indicates if the intermediate state ('tableLookup_' and 'spiller_') has
   // been cleared. This can happen either when the operator is closed or when
   // the last hash build operator transfers ownership of them to itself while
   // building the final hash table.
   bool stateCleared_{false};
 
-  // Container for the rows being accumulated.
-  std::unique_ptr<BaseHashTable> table_;
+  // Lightweight access path for the table being built. The current
+  // implementation still owns one physical table locally and routes all lookup
+  // requests to it.
+  std::shared_ptr<JoinTableLookup> tableLookup_;
 
   // Used for building hash table while adding input rows.
   std::unique_ptr<HashLookup> lookup_;

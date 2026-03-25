@@ -1968,6 +1968,26 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
     size_t vectorHasherMaxNumDistinct,
     bool dropDuplicates,
     folly::Executor* executor) {
+  std::vector<std::shared_ptr<BaseHashTable>> sharedTables;
+  sharedTables.reserve(tables.size());
+  for (auto& table : tables) {
+    sharedTables.emplace_back(std::move(table));
+  }
+  prepareJoinTable(
+      std::move(sharedTables),
+      spillInputStartPartitionBit,
+      vectorHasherMaxNumDistinct,
+      dropDuplicates,
+      executor);
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::prepareJoinTable(
+    std::vector<std::shared_ptr<BaseHashTable>> tables,
+    int8_t spillInputStartPartitionBit,
+    size_t vectorHasherMaxNumDistinct,
+    bool dropDuplicates,
+    folly::Executor* executor) {
   buildExecutor_ = executor;
   if (dropDuplicates) {
     if (table_ != nullptr) {
@@ -1982,9 +2002,10 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
   }
   otherTables_.reserve(tables.size());
   for (auto& table : tables) {
-    otherTables_.emplace_back(
-        std::unique_ptr<HashTable<ignoreNullKeys>>(
-            dynamic_cast<HashTable<ignoreNullKeys>*>(table.release())));
+    auto typedTable =
+        std::dynamic_pointer_cast<HashTable<ignoreNullKeys>>(table);
+    VELOX_CHECK_NOT_NULL(typedTable);
+    otherTables_.emplace_back(std::move(typedTable));
   }
 
   // If there are multiple tables, we need to merge the 'columnHasNulls' flags

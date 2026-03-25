@@ -19,6 +19,7 @@
 #include "velox/common/base/StatsReporter.h"
 #include "velox/common/testutil/TestValue.h"
 #include "velox/exec/HashTableCache.h"
+#include "velox/exec/JoinTableLookup.h"
 #include "velox/exec/OperatorType.h"
 #include "velox/exec/OperatorUtils.h"
 #include "velox/exec/Task.h"
@@ -185,7 +186,10 @@ bool HashBuild::getHashTableFromCache() {
   // We pass a shared_ptr copy (not std::move) since the cache retains
   // ownership.
   joinBridge_->setHashTable(
-      cacheEntry_->table, {}, cacheEntry_->hasNullKeys, nullptr);
+      std::make_shared<SingleJoinTableLookup>(cacheEntry_->table),
+      {},
+      cacheEntry_->hasNullKeys,
+      nullptr);
   // Record cache hit metric.
   stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kHashTableCacheHit), RuntimeCounter(1));
@@ -216,8 +220,32 @@ bool HashBuild::receivedCachedHashTable() {
   return true;
 }
 
+BaseHashTable* HashBuild::currentHashTable() {
+  VELOX_CHECK_NOT_NULL(tableLookup_);
+  auto singleTableLookup =
+      std::dynamic_pointer_cast<SingleJoinTableLookup>(tableLookup_);
+  VELOX_CHECK_NOT_NULL(singleTableLookup);
+  return singleTableLookup->hashTable().get();
+}
+
+const BaseHashTable* HashBuild::currentHashTable() const {
+  VELOX_CHECK_NOT_NULL(tableLookup_);
+  auto singleTableLookup =
+      std::dynamic_pointer_cast<SingleJoinTableLookup>(tableLookup_);
+  VELOX_CHECK_NOT_NULL(singleTableLookup);
+  return singleTableLookup->hashTable().get();
+}
+
+std::shared_ptr<BaseHashTable> HashBuild::currentHashTableShared() const {
+  VELOX_CHECK_NOT_NULL(tableLookup_);
+  auto singleTableLookup =
+      std::dynamic_pointer_cast<SingleJoinTableLookup>(tableLookup_);
+  VELOX_CHECK_NOT_NULL(singleTableLookup);
+  return singleTableLookup->hashTable();
+}
+
 void HashBuild::setupTable() {
-  VELOX_CHECK_NULL(table_);
+  VELOX_CHECK_NULL(tableLookup_);
 
   const auto numKeys = keyChannels_.size();
   std::vector<std::unique_ptr<VectorHasher>> keyHashers;
@@ -234,51 +262,59 @@ void HashBuild::setupTable() {
     dependentTypes.emplace_back(tableType_->childAt(i));
   }
   auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+  std::shared_ptr<BaseHashTable> table;
   if (joinNode_->isRightJoin() || joinNode_->isFullJoin() ||
       joinNode_->isRightSemiProjectJoin()) {
     // Do not ignore null keys.
-    table_ = HashTable<false>::createForJoin(
-        std::move(keyHashers),
-        dependentTypes,
-        true, // allowDuplicates
-        true, // hasProbedFlag
-        queryConfig.minTableRowsForParallelJoinBuild(),
-        tableMemoryPool());
+    table = std::shared_ptr<BaseHashTable>(
+        HashTable<false>::createForJoin(
+            std::move(keyHashers),
+            dependentTypes,
+            true, // allowDuplicates
+            true, // hasProbedFlag
+            queryConfig.minTableRowsForParallelJoinBuild(),
+            tableMemoryPool())
+            .release());
   } else {
     // Right semi join needs to tag build rows that were probed.
     const bool needProbedFlag = joinNode_->isRightSemiFilterJoin();
     if (isLeftNullAwareJoinWithFilter(joinNode_)) {
       // We need to check null key rows in build side in case of null-aware anti
       // or left semi project join with filter set.
-      table_ = HashTable<false>::createForJoin(
-          std::move(keyHashers),
-          dependentTypes,
-          !dropDuplicates_, // allowDuplicates
-          needProbedFlag, // hasProbedFlag
-          queryConfig.minTableRowsForParallelJoinBuild(),
-          tableMemoryPool());
+      table = std::shared_ptr<BaseHashTable>(
+          HashTable<false>::createForJoin(
+              std::move(keyHashers),
+              dependentTypes,
+              !dropDuplicates_, // allowDuplicates
+              needProbedFlag, // hasProbedFlag
+              queryConfig.minTableRowsForParallelJoinBuild(),
+              tableMemoryPool())
+              .release());
     } else {
       // Ignore null keys
-      table_ = HashTable<true>::createForJoin(
-          std::move(keyHashers),
-          dependentTypes,
-          !dropDuplicates_, // allowDuplicates
-          needProbedFlag, // hasProbedFlag
-          queryConfig.minTableRowsForParallelJoinBuild(),
-          tableMemoryPool(),
-          queryConfig.hashProbeBloomFilterPushdownMaxSize());
+      table = std::shared_ptr<BaseHashTable>(
+          HashTable<true>::createForJoin(
+              std::move(keyHashers),
+              dependentTypes,
+              !dropDuplicates_, // allowDuplicates
+              needProbedFlag, // hasProbedFlag
+              queryConfig.minTableRowsForParallelJoinBuild(),
+              tableMemoryPool(),
+              queryConfig.hashProbeBloomFilterPushdownMaxSize())
+              .release());
     }
   }
-  analyzeKeys_ = table_->hashMode() != BaseHashTable::HashMode::kHash;
+  tableLookup_ = std::make_shared<SingleJoinTableLookup>(std::move(table));
+  analyzeKeys_ = currentHashTable()->hashMode() != BaseHashTable::HashMode::kHash;
   if (abandonHashBuildDedupMinPct_ == 0) {
     // Building a HashTable without duplicates is disabled if
     // abandonBuildNoDupHashMinPct_ is 0.
     abandonHashBuildDedup_ = true;
-    table_->setAllowDuplicates(true);
+    currentHashTable()->setAllowDuplicates(true);
     return;
   }
   // Only create HashLookup when dedup is enabled.
-  lookup_ = std::make_unique<HashLookup>(table_->hashers(), pool());
+  lookup_ = std::make_unique<HashLookup>(currentHashTable()->hashers(), pool());
 }
 
 void HashBuild::setupSpiller(SpillPartition* spillPartition) {
@@ -330,7 +366,7 @@ void HashBuild::setupSpiller(SpillPartition* spillPartition) {
   spiller_ = std::make_unique<HashBuildSpiller>(
       joinType_,
       restoringPartitionId_,
-      table_->rows(),
+      currentHashTable()->rows(),
       spillType_,
       HashBitRange(
           startPartitionBit, startPartitionBit + config->numPartitionBits),
@@ -398,7 +434,7 @@ void HashBuild::removeInputRowsForAntiJoinFilter() {
     }
   };
   for (auto channel : keyFilterChannels_) {
-    removeNulls(table_->hashers()[channel]->decodedVector());
+    removeNulls(currentHashTable()->hashers()[channel]->decodedVector());
   }
   for (auto channel : dependentFilterChannels_) {
     removeNulls(*decoders_[channel]);
@@ -422,7 +458,7 @@ void HashBuild::addInput(RowVectorPtr input) {
   activeRows_.resize(input->size());
   activeRows_.setAll();
 
-  auto& hashers = table_->hashers();
+  auto& hashers = currentHashTable()->hashers();
 
   for (auto i = 0; i < hashers.size(); ++i) {
     auto key = input->childAt(hashers[i]->channel())->loadedVector();
@@ -484,10 +520,11 @@ void HashBuild::addInput(RowVectorPtr input) {
   }
 
   if (dropDuplicates_ && !abandonHashBuildDedup_) {
-    const bool abandonEarly = abandonHashBuildDedupEarly(table_->numDistinct());
+    const bool abandonEarly =
+        abandonHashBuildDedupEarly(currentHashTable()->numDistinct());
     if (!abandonEarly) {
       numHashInputRows_ += activeRows_.countSelected();
-      table_->prepareForGroupProbe(
+      currentHashTable()->prepareForGroupProbe(
           *lookup_,
           input,
           activeRows_,
@@ -495,7 +532,7 @@ void HashBuild::addInput(RowVectorPtr input) {
       if (lookup_->rows.empty()) {
         return;
       }
-      table_->groupProbe(
+      currentHashTable()->groupProbe(
           *lookup_, BaseHashTable::kNoSpillInputStartPartitionBit);
       return;
     }
@@ -519,8 +556,17 @@ void HashBuild::addInput(RowVectorPtr input) {
       analyzeKeys_ = hasher->mayUseValueIds();
     }
   }
-  auto rows = table_->rows();
-  auto nextOffset = rows->nextOffset();
+  if (hashes_.size() < activeRows_.end()) {
+    hashes_.resize(activeRows_.end());
+  }
+  for (auto i = 0; i < hashers.size(); ++i) {
+    auto& hasher = hashers[i];
+    if (hasher->channel() != kConstantChannel) {
+      hasher->hash(activeRows_, i > 0, hashes_);
+    } else {
+      hasher->hashPrecomputed(activeRows_, i > 0, hashes_);
+    }
+  }
   FlatVector<bool>* spillProbedFlagVector{nullptr};
   if (isInputFromSpill() && needProbedFlagSpill_) {
     spillProbedFlagVector =
@@ -528,7 +574,10 @@ void HashBuild::addInput(RowVectorPtr input) {
   }
 
   activeRows_.applyToSelected([&](auto rowIndex) {
+    auto& targetTable = tableLookup_->table(hashes_[rowIndex]);
+    auto* rows = targetTable.rows();
     char* newRow = rows->newRow();
+    auto nextOffset = rows->nextOffset();
     if (nextOffset) {
       *reinterpret_cast<char**>(newRow + nextOffset) = nullptr;
     }
@@ -563,7 +612,7 @@ void HashBuild::ensureInputFits(RowVectorPtr& input) {
   // is already sufficient reservations.
   VELOX_CHECK(canSpill());
 
-  auto* rows = table_->rows();
+  auto* rows = currentHashTable()->rows();
   const auto numRows = rows->numRows();
 
   auto [freeRows, outOfLineFreeBytes] = rows->freeSpace();
@@ -583,7 +632,8 @@ void HashBuild::ensureInputFits(RowVectorPtr& input) {
   const auto minReservationBytes =
       currentUsage * spillConfig_->minSpillableReservationPct / 100;
   const auto availableReservationBytes = pool()->availableReservation();
-  const auto tableIncrementBytes = table_->hashTableSizeIncrease(input->size());
+  const auto tableIncrementBytes =
+      currentHashTable()->hashTableSizeIncrease(input->size());
   const int64_t flatBytes = input->estimateFlatSize();
   const auto rowContainerIncrementBytes = numRows == 0
       ? flatBytes * 2
@@ -714,7 +764,7 @@ void HashBuild::computeSpillPartitions(const RowVectorPtr& input) {
   if (hashes_.size() < activeRows_.end()) {
     hashes_.resize(activeRows_.end());
   }
-  const auto& hashers = table_->hashers();
+  const auto& hashers = currentHashTable()->hashers();
   for (auto i = 0; i < hashers.size(); ++i) {
     auto& hasher = hashers[i];
     if (hasher->channel() != kConstantChannel) {
@@ -812,7 +862,7 @@ bool HashBuild::finishHashBuild() {
   uint64_t numRows{0};
   {
     std::lock_guard<std::mutex> l(mutex_);
-    numRows += table_->rows()->numRows();
+    numRows += currentHashTable()->rows()->numRows();
   }
   for (auto& peer : peers) {
     auto op = peer->findOperator(planNodeId());
@@ -831,14 +881,13 @@ bool HashBuild::finishHashBuild() {
           !build->stateCleared_,
           "Internal state for a peer is empty. It might have already"
           " been closed.");
-      numRows += build->table_->rows()->numRows();
+      numRows += build->currentHashTable()->rows()->numRows();
     }
     otherBuilds.push_back(build);
   }
 
   ensureTableFits(numRows);
-
-  std::vector<std::unique_ptr<BaseHashTable>> otherTables;
+  std::vector<std::shared_ptr<BaseHashTable>> otherTables;
   otherTables.reserve(peers.size());
   SpillPartitionSet spillPartitions;
   for (auto* build : otherBuilds) {
@@ -850,8 +899,8 @@ bool HashBuild::finishHashBuild() {
           "Internal state for a peer is empty. It might have already"
           " been closed.");
       build->stateCleared_ = true;
-      VELOX_CHECK_NOT_NULL(build->table_);
-      otherTables.push_back(std::move(build->table_));
+      otherTables.push_back(build->currentHashTableShared());
+      build->tableLookup_.reset();
       spiller = std::move(build->spiller_);
     }
     if (spiller != nullptr) {
@@ -881,7 +930,7 @@ bool HashBuild::finishHashBuild() {
   CpuWallTiming timing;
   {
     CpuWallTimer cpuWallTimer{timing};
-    table_->prepareJoinTable(
+    currentHashTable()->prepareJoinTable(
         std::move(otherTables),
         isInputFromSpill() ? spillConfig()->startPartitionBit
                            : BaseHashTable::kNoSpillInputStartPartitionBit,
@@ -918,10 +967,10 @@ bool HashBuild::finishHashBuild() {
   }
 
   // For hash table caching: the last driver caches the merged table.
-  std::shared_ptr<BaseHashTable> table = std::move(table_);
+  auto table = currentHashTableShared();
   maybeSetHashTableInCache(table);
   joinBridge_->setHashTable(
-      table,
+      std::move(tableLookup_),
       std::move(spillPartitions),
       joinHasNullKeys_,
       std::move(tableSpillFunc));
@@ -954,7 +1003,7 @@ void HashBuild::ensureTableFits(uint64_t numRows) {
   //
   // TODO: make this query configurable.
   const uint64_t memoryBytesToReserve =
-      table_->estimateHashTableSize(numRows) * 1.1;
+      currentHashTable()->estimateHashTableSize(numRows) * 1.1;
   {
     Operator::ReclaimableSectionGuard guard(this);
     if (pool()->maybeReserve(memoryBytesToReserve)) {
@@ -999,7 +1048,7 @@ void HashBuild::setupSpillInput(HashJoinBridge::SpillInput spillInput) {
     return;
   }
 
-  table_.reset();
+  tableLookup_.reset();
   spiller_.reset();
   spillInputReader_.reset();
   restoringPartitionId_.reset();
@@ -1040,13 +1089,14 @@ void HashBuild::processSpillInput() {
 
 void HashBuild::addRuntimeStats() {
   // Report range sizes and number of distinct values for the join keys.
-  const auto& hashers = table_->hashers();
-  const auto hashTableStats = table_->stats();
+  const auto* table = currentHashTable();
+  const auto& hashers = table->hashers();
+  const auto hashTableStats = table->stats();
   uint64_t asRange{0};
   uint64_t asDistinct{0};
   auto lockedStats = stats_.wlock();
 
-  for (const auto& timing : table_->parallelJoinBuildStats().partitionTimings) {
+  for (const auto& timing : table->parallelJoinBuildStats().partitionTimings) {
     lockedStats->getOutputTiming.add(timing);
     lockedStats->addRuntimeStat(
         std::string(BaseHashTable::kParallelJoinPartitionWallNanos),
@@ -1056,7 +1106,7 @@ void HashBuild::addRuntimeStats() {
         RuntimeCounter(timing.cpuNanos, RuntimeCounter::Unit::kNanos));
   }
 
-  for (const auto& timing : table_->parallelJoinBuildStats().buildTimings) {
+  for (const auto& timing : table->parallelJoinBuildStats().buildTimings) {
     lockedStats->getOutputTiming.add(timing);
     lockedStats->addRuntimeStat(
         std::string(BaseHashTable::kParallelJoinBuildWallNanos),
@@ -1067,7 +1117,7 @@ void HashBuild::addRuntimeStats() {
   }
 
   for (const auto& timing :
-       table_->parallelJoinBuildStats().bloomFilterPartitionTimings) {
+       table->parallelJoinBuildStats().bloomFilterPartitionTimings) {
     lockedStats->getOutputTiming.add(timing);
     if (timing.wallNanos > 0) {
       lockedStats->addRuntimeStat(
@@ -1083,7 +1133,7 @@ void HashBuild::addRuntimeStats() {
   }
 
   for (const auto& timing :
-       table_->parallelJoinBuildStats().bloomFilterBuildTimings) {
+       table->parallelJoinBuildStats().bloomFilterBuildTimings) {
     lockedStats->getOutputTiming.add(timing);
     if (timing.wallNanos > 0) {
       lockedStats->addRuntimeStat(
@@ -1131,7 +1181,7 @@ void HashBuild::addRuntimeStats() {
   lockedStats->addRuntimeStat(
       std::string(BaseHashTable::kVectorHasherMergeCpuNanos),
       RuntimeCounter(
-          table_->vectorHasherMergeTiming().cpuNanos,
+          table->vectorHasherMergeTiming().cpuNanos,
           RuntimeCounter::Unit::kNanos));
 }
 
@@ -1329,7 +1379,7 @@ void HashBuild::reclaim(
 
   for (auto* op : operators) {
     HashBuild* buildOp = static_cast<HashBuild*>(op);
-    buildOp->table_->clear(true);
+    buildOp->currentHashTable()->clear(true);
     buildOp->pool()->release();
   }
 }
@@ -1353,7 +1403,7 @@ bool HashBuild::nonReclaimableState() const {
   // 1) the hash table has been built by the last build thread (indicated by
   //    state_)
   // 2) the last build operator has transferred ownership of 'this operator's
-  //    internal state (table_ and spiller_) to itself.
+  //    internal state (tableLookup_ and spiller_) to itself.
   // 3) it has completed spilling before reaching either of the previous
   //    two states.
   return ((state_ != State::kRunning) && (state_ != State::kWaitForBuild) &&
@@ -1371,7 +1421,7 @@ void HashBuild::close() {
     stateCleared_ = true;
     joinBridge_.reset();
     spiller_.reset();
-    table_.reset();
+    tableLookup_.reset();
   }
 }
 
@@ -1451,7 +1501,7 @@ void HashBuild::abandonHashBuildDedup() {
   addRuntimeStat(
       std::string(HashBuild::kAbandonBuildNoDupHash), RuntimeCounter(1));
   abandonHashBuildDedup_ = true;
-  table_->setAllowDuplicates(true);
+  currentHashTable()->setAllowDuplicates(true);
   lookup_.reset();
 }
 
