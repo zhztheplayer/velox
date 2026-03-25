@@ -832,6 +832,8 @@ uint32_t HashTable<ignoreNullKeys>::getRadixPartition(uint64_t hash) const {
 
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
+  TestValue::adjust(
+      "facebook::velox::exec::HashTable::buildRadixPartitions", this);
   VELOX_CHECK(
       canBuildRadixPartitions(numRadixBits),
       "Unsupported radix build configuration: hashMode={}, numRadixBits={}, "

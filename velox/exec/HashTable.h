@@ -373,6 +373,14 @@ class BaseHashTable {
   /// not freed which can be used for flushing a partial group by, for example.
   virtual void clear(bool freeTable) = 0;
 
+  virtual bool canBuildRadixPartitions(uint8_t numRadixBits) const = 0;
+
+  virtual void buildRadixPartitions(uint8_t numRadixBits) = 0;
+
+  virtual uint8_t radixPartitionBits() const = 0;
+
+  virtual bool isRadixPartitioned() const = 0;
+
   /// Returns the capacity of the internal hash table which is number of rows
   /// it can stores in a group by or hash join build.
   virtual uint64_t capacity() const = 0;
@@ -707,17 +715,17 @@ class HashTable : public BaseHashTable {
       bool dropDuplicates = false,
       folly::Executor* executor = nullptr) override;
 
-  bool canBuildRadixPartitions(uint8_t numRadixBits) const;
+  bool canBuildRadixPartitions(uint8_t numRadixBits) const override;
 
-  void buildRadixPartitions(uint8_t numRadixBits);
+  void buildRadixPartitions(uint8_t numRadixBits) override;
 
   uint32_t getRadixPartition(uint64_t hash) const;
 
-  uint8_t radixPartitionBits() const {
+  uint8_t radixPartitionBits() const override {
     return radixPartitionBits_;
   }
 
-  bool isRadixPartitioned() const {
+  bool isRadixPartitioned() const override {
     return isRadixPartitioned_;
   }
 

@@ -890,6 +890,21 @@ bool HashBuild::finishHashBuild() {
         allowParallelJoinBuild ? operatorCtx_->task()->queryCtx()->executor()
                                : nullptr);
   }
+  // The first radix-build iteration only supports the simple in-memory
+  // single-table case. Spilled input and merged peer tables are excluded.
+  constexpr uint8_t kRadixPartitionBits = 4;
+  if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild) {
+    // The first radix-build iteration only supports the generic hash table
+    // representation, so normalize the build table mode before checking
+    // whether the table can be rebuilt into radix-partitioned form.
+    if (table_->hashMode() != BaseHashTable::HashMode::kHash) {
+      table_->forceGenericHashMode(
+          BaseHashTable::kNoSpillInputStartPartitionBit);
+    }
+    if (table_->canBuildRadixPartitions(kRadixPartitionBits)) {
+      table_->buildRadixPartitions(kRadixPartitionBits);
+    }
+  }
   stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kBuildWallNanos),
       RuntimeCounter(timing.wallNanos, RuntimeCounter::Unit::kNanos));
