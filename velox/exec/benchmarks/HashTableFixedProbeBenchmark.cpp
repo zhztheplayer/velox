@@ -122,6 +122,7 @@ class FixedProbeBenchmark {
     params_ = params;
     table_.reset();
     buildRows_.clear();
+    expectedHits_.clear();
 
     const bool radixEnabled = params_.numRadixBits > 0;
 
@@ -156,6 +157,7 @@ class FixedProbeBenchmark {
     if (radixEnabled) {
       table_->buildRadixPartitions(params_.numRadixBits);
     }
+    buildExpectedHits();
   }
 
   FixedProbeResult run() {
@@ -206,7 +208,8 @@ class FixedProbeBenchmark {
 
       for (auto row = 0; row < batchSize; ++row) {
         numHit += lookup->hits[row] != nullptr;
-        VELOX_CHECK_EQ(buildRows_[(offset + row) % params_.buildSize], lookup->hits[row]);
+        VELOX_CHECK_EQ(
+            expectedHits_[(offset + row) % params_.buildSize], lookup->hits[row]);
       }
     }
     VELOX_CHECK_EQ(numHit, params_.probeSize);
@@ -257,6 +260,36 @@ class FixedProbeBenchmark {
     }
   }
 
+  void buildExpectedHits() {
+    expectedHits_.assign(params_.buildSize, nullptr);
+
+    auto rows = raw_vector<char*>(pool_.get());
+    rows.resize(table_->rows()->numRows());
+    RowContainerIterator iterator;
+    vector_size_t numRows = 0;
+    while (auto numListed =
+               table_->rows()->listRows(&iterator, 1024, rows.data() + numRows)) {
+      numRows += numListed;
+    }
+    VELOX_CHECK_EQ(numRows, params_.buildSize);
+
+    auto keysVector = BaseVector::create(BIGINT(), numRows, pool_.get());
+    RowContainer::extractColumn(
+        rows.data(),
+        numRows,
+        table_->rows()->columnAt(0),
+        table_->rows()->columnHasNulls(0),
+        keysVector);
+    auto flatKeys = keysVector->asFlatVector<int64_t>();
+
+    for (vector_size_t row = 0; row < numRows; ++row) {
+      const auto key = flatKeys->valueAt(row);
+      VELOX_CHECK_GE(key, 0);
+      VELOX_CHECK_LT(key, params_.buildSize);
+      expectedHits_[key] = rows[row];
+    }
+  }
+
   std::shared_ptr<memory::MemoryPool> pool_{
       memory::memoryManager()->addLeafPool()};
   VectorMaker vectorMaker_{pool_.get()};
@@ -264,6 +297,7 @@ class FixedProbeBenchmark {
   RowVectorPtr probe_;
   FlatVectorPtr<int64_t> probeKeys_;
   std::vector<char*> buildRows_;
+  std::vector<char*> expectedHits_;
   std::unique_ptr<HashTable<true>> table_;
   FixedProbeParams params_{"default", 1, 2, 0};
 };
