@@ -2633,6 +2633,46 @@ void populateLookupRows(
     rows.applyToSelected([&](auto row) { lookupRows.push_back(row); });
   }
 }
+
+raw_vector<vector_size_t> radixClusterLookupRows(
+    const raw_vector<uint64_t>& hashes,
+    const raw_vector<vector_size_t>& lookupRows,
+    uint8_t radixPartitionBits,
+    std::function<uint32_t(uint64_t)> getRadixPartition,
+    memory::MemoryPool* pool) {
+  VELOX_CHECK_GT(radixPartitionBits, 0);
+  if (lookupRows.empty()) {
+    return raw_vector<vector_size_t>(pool);
+  }
+
+  const auto numPartitions = 1U << radixPartitionBits;
+  raw_vector<vector_size_t> partitionStarts(pool);
+  partitionStarts.resize(numPartitions + 1);
+  std::fill(partitionStarts.begin(), partitionStarts.end(), 0);
+
+  for (auto row : lookupRows) {
+    ++partitionStarts[getRadixPartition(hashes[row]) + 1];
+  }
+  for (auto i = 1; i < partitionStarts.size(); ++i) {
+    partitionStarts[i] += partitionStarts[i - 1];
+  }
+
+  raw_vector<vector_size_t> partitionOffsets(pool);
+  partitionOffsets.resize(numPartitions);
+  for (auto i = 0; i < numPartitions; ++i) {
+    partitionOffsets[i] = partitionStarts[i];
+  }
+
+  raw_vector<vector_size_t> clusteredRows(pool);
+  clusteredRows.resize(lookupRows.size());
+  // Preserve the original relative order within each radix partition so the
+  // clustering only changes the cross-partition scheduling of probe work.
+  for (auto row : lookupRows) {
+    const auto partition = getRadixPartition(hashes[row]);
+    clusteredRows[partitionOffsets[partition]++] = row;
+  }
+  return clusteredRows;
+}
 } // namespace
 
 std::string BaseHashTable::RowsIterator::toString() const {
@@ -2722,6 +2762,16 @@ void HashTable<ignoreNullKeys>::prepareForJoinProbe(
   }
 
   populateLookupRows(rows, lookup.rows);
+  if (isRadixPartitioned_) {
+    TestValue::adjust(
+        "facebook::velox::exec::HashTable::prepareForJoinProbe::radix", this);
+    lookup.rows = radixClusterLookupRows(
+        lookup.hashes,
+        lookup.rows,
+        radixPartitionBits_,
+        [&](uint64_t hash) { return getRadixPartition(hash); },
+        pool_);
+  }
 }
 
 } // namespace facebook::velox::exec

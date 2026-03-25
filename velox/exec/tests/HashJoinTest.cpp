@@ -2919,9 +2919,13 @@ TEST_P(HashJoinTest, radixBuildOnSerialVarcharJoin) {
                   .planNode();
 
   bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
   SCOPED_TESTVALUE_SET(
       "facebook::velox::exec::HashTable::buildRadixPartitions",
       std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
 
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
@@ -2932,6 +2936,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialVarcharJoin) {
       .run();
 
   ASSERT_TRUE(radixBuildTriggered);
+  ASSERT_TRUE(radixProbeTriggered);
 }
 
 TEST_P(HashJoinTest, semiProject) {

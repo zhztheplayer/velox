@@ -935,6 +935,48 @@ TEST_P(HashTableTest, buildRadixPartitions) {
   }
 }
 
+TEST_P(HashTableTest, prepareForJoinProbeRadixClustersRows) {
+  auto type = ROW({BIGINT()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      1'000,
+      pool());
+
+  std::vector<RowVectorPtr> batches;
+  constexpr auto kNumRows = 1 << 12;
+  makeRows(kNumRows, 1, 0, type, batches);
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+  table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
+  table->buildRadixPartitions(2);
+
+  HashLookup lookup(table->hashers(), pool());
+  SelectivityVector rows(batches[0]->size());
+  table->prepareForJoinProbe(lookup, batches[0], rows, true);
+
+  ASSERT_FALSE(lookup.rows.empty());
+  std::vector<vector_size_t> partitionCounts(4, 0);
+  uint32_t previousPartition = 0;
+  for (auto i = 0; i < lookup.rows.size(); ++i) {
+    const auto row = lookup.rows[i];
+    const auto partition = table->getRadixPartition(lookup.hashes[row]);
+    if (i > 0) {
+      ASSERT_LE(previousPartition, partition);
+    }
+    previousPartition = partition;
+    ++partitionCounts[partition];
+  }
+  for (auto count : partitionCounts) {
+    ASSERT_GT(count, 0);
+  }
+}
+
 TEST_P(HashTableTest, listJoinResultsSize) {
   baseString_ =
       "If you count carefully, you will notice there are exactly 105 characters"
