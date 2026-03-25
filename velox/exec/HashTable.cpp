@@ -812,8 +812,13 @@ void HashTable<ignoreNullKeys>::refreshColumnHasNulls() {
 template <bool ignoreNullKeys>
 bool HashTable<ignoreNullKeys>::canBuildRadixPartitions(
     uint8_t numRadixBits) const {
-  if (numRadixBits == 0 || hashMode_ != HashMode::kHash || table_ == nullptr ||
-      !isJoinBuild_ || !otherTables_.empty()) {
+  if (numRadixBits == 0 || table_ == nullptr || !isJoinBuild_ ||
+      !otherTables_.empty()) {
+    return false;
+  }
+
+  if (hashMode_ != HashMode::kHash &&
+      hashMode_ != HashMode::kNormalizedKey) {
     return false;
   }
 
@@ -844,6 +849,14 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
       isJoinBuild_,
       otherTables_.size());
 
+  if (hashMode_ == HashMode::kNormalizedKey) {
+    forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
+    VELOX_CHECK_EQ(hashMode_, HashMode::kHash);
+    VELOX_CHECK(
+        canBuildRadixPartitions(numRadixBits),
+        "Failed to enable generic hash mode for radix build");
+  }
+
   radixPartitionBits_ = numRadixBits;
   isRadixPartitioned_ = false;
   const auto numPartitions = 1U << radixPartitionBits_;
@@ -867,12 +880,23 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   while (
       auto numRows =
           rows_->listRows(&iterator, kHashBatchSize, rows.data() + rowIndex)) {
-    VELOX_CHECK(
-        hashRows(
+    if (hashMode_ == HashMode::kHash) {
+      VELOX_CHECK(
+          hashRows(
+              folly::Range<char**>(rows.data() + rowIndex, numRows),
+              false,
+              batchHashes),
+          "Failed to hash build rows for radix partitioning");
+    } else {
+      std::fill(batchHashes.begin(), batchHashes.begin() + numRows, 0);
+      for (int32_t i = 0; i < hashers_.size(); ++i) {
+        rows_->hash(
+            i,
             folly::Range<char**>(rows.data() + rowIndex, numRows),
-            false,
-            batchHashes),
-        "Failed to hash build rows for radix partitioning");
+            i > 0,
+            batchHashes.data());
+      }
+    }
     std::copy_n(batchHashes.data(), numRows, hashes.data() + rowIndex);
     rowIndex += numRows;
   }
@@ -935,6 +959,7 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   }
   numDistinct_ = rows_->numRows();
   numTombstones_ = 0;
+  hashMode_ = HashMode::kHash;
 
   if (numDistinct_ > 0) {
     checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);

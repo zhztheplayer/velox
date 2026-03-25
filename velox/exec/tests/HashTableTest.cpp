@@ -977,6 +977,71 @@ TEST_P(HashTableTest, prepareForJoinProbeRadixClustersRows) {
   }
 }
 
+TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
+  auto type = ROW({"k0", "k1"}, {BIGINT(), VARCHAR()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(VARCHAR(), 1));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      1'000,
+      pool());
+
+  std::vector<std::string> keys;
+  keys.reserve(8'192);
+  for (auto row = 0; row < 8'192; ++row) {
+    keys.push_back(fmt::format("s{}", row));
+  }
+  RowVectorPtr buildBatch = makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>(8'192, [](auto row) { return row; }),
+      makeFlatVector<std::string>(keys),
+  });
+  std::vector<RowVectorPtr> batches{buildBatch};
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
+  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+
+  table->buildRadixPartitions(2);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+  ASSERT_TRUE(table->isRadixPartitioned());
+
+  auto testHelper = HashTableTestHelper<true>::create(table.get());
+  raw_vector<char*> rows(pool());
+  rows.resize(table->rows()->numRows());
+  raw_vector<uint64_t> hashes(pool());
+  hashes.resize(table->rows()->numRows());
+
+  RowContainerIterator iterator;
+  vector_size_t numRows = 0;
+  while (auto numListed = table->rows()->listRows(
+             &iterator, 1024, rows.data() + numRows)) {
+    raw_vector<uint64_t> batchHashes(pool());
+    batchHashes.resize(1024);
+    ASSERT_TRUE(testHelper.hashRows(
+        folly::Range<char**>(rows.data() + numRows, numListed),
+        false,
+        batchHashes));
+    std::copy_n(batchHashes.data(), numListed, hashes.data() + numRows);
+    numRows += numListed;
+  }
+
+  uint32_t previousPartition = 0;
+  for (auto i = 0; i < numRows; ++i) {
+    const auto partition = table->getRadixPartition(hashes[i]);
+    if (i > 0) {
+      ASSERT_LE(previousPartition, partition);
+    }
+    previousPartition = partition;
+  }
+}
+
 TEST_P(HashTableTest, listJoinResultsSize) {
   baseString_ =
       "If you count carefully, you will notice there are exactly 105 characters"
