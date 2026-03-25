@@ -717,6 +717,10 @@ class HashTable : public BaseHashTable {
     return radixPartitionBits_;
   }
 
+  bool isRadixPartitioned() const {
+    return isRadixPartitioned_;
+  }
+
   void prepareForJoinProbe(
       HashLookup& lookup,
       const RowVectorPtr& input,
@@ -1205,6 +1209,7 @@ class HashTable : public BaseHashTable {
   // Counts the number of rehash() calls.
   int64_t numRehashes_{0};
   uint8_t radixPartitionBits_{0};
+  bool isRadixPartitioned_{false};
   HashMode hashMode_ = HashMode::kArray;
   // Owns the memory of multiple build side hash join tables that are
   // combined into a single probe hash table.

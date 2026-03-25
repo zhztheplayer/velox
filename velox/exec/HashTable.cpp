@@ -729,6 +729,7 @@ void HashTable<ignoreNullKeys>::allocateTables(
     int8_t spillInputStartPartitionBit) {
   VELOX_CHECK(bits::isPowerOfTwo(size), "Size is not a power of two: {}", size);
   VELOX_CHECK_GT(size, 0);
+  isRadixPartitioned_ = false;
   capacity_ = size;
   const uint64_t byteSize = capacity_ * tableSlotSize();
   VELOX_CHECK_EQ(byteSize % kBucketSize, 0);
@@ -766,6 +767,7 @@ void HashTable<ignoreNullKeys>::clear(bool freeTable) {
   numDistinct_ = 0;
   numTombstones_ = 0;
   radixPartitionBits_ = 0;
+  isRadixPartitioned_ = false;
 }
 
 template <bool ignoreNullKeys>
@@ -841,10 +843,13 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
       otherTables_.size());
 
   radixPartitionBits_ = numRadixBits;
+  isRadixPartitioned_ = false;
   const auto numPartitions = 1U << radixPartitionBits_;
   raw_vector<vector_size_t> partitionStarts(pool_);
   partitionStarts.resize(numPartitions + 1);
+  std::fill(partitionStarts.begin(), partitionStarts.end(), 0);
   if (numDistinct_ == 0) {
+    isRadixPartitioned_ = true;
     return;
   }
 
@@ -891,8 +896,8 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
     partitionedRows[partitionOffsets[partition]++] = rows[i];
   }
 
-  auto oldRows = std::move(rows_);
   auto newRows = newRowContainer();
+  auto oldRows = std::move(rows_);
   auto serializedRows = std::dynamic_pointer_cast<FlatVector<StringView>>(
       BaseVector::create(VARBINARY(), kHashBatchSize, pool_));
   VELOX_CHECK_NOT_NULL(serializedRows);
@@ -932,6 +937,7 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   if (numDistinct_ > 0) {
     checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);
   }
+  isRadixPartitioned_ = true;
 }
 
 template <bool ignoreNullKeys>
@@ -1684,6 +1690,7 @@ template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::rehash(
     bool initNormalizedKeys,
     int8_t spillInputStartPartitionBit) {
+  isRadixPartitioned_ = false;
   ++numRehashes_;
   if (canApplyParallelJoinBuild()) {
     parallelJoinBuild();
@@ -1744,6 +1751,7 @@ void HashTable<ignoreNullKeys>::setHashMode(
     int32_t numNew,
     int8_t spillInputStartPartitionBit) {
   VELOX_CHECK_NE(hashMode_, HashMode::kHash);
+  isRadixPartitioned_ = false;
   TestValue::adjust("facebook::velox::exec::HashTable::setHashMode", &mode);
   if (mode == HashMode::kArray) {
     const auto bytes = capacity_ * tableSlotSize();
@@ -2137,6 +2145,7 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
     folly::Executor* executor) {
   buildExecutor_ = executor;
   radixPartitionBits_ = 0;
+  isRadixPartitioned_ = false;
   if (dropDuplicates) {
     if (table_ != nullptr) {
       // Reset table_ and capacity_ to trigger rehash.

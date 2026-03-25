@@ -891,11 +891,14 @@ TEST_P(HashTableTest, buildRadixPartitions) {
   copyVectorsToTable(batches, 0, table.get());
   table->prepareJoinTable(
       {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+  table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
 
   ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  ASSERT_FALSE(table->isRadixPartitioned());
   table->buildRadixPartitions(2);
 
   ASSERT_EQ(table->radixPartitionBits(), 2);
+  ASSERT_TRUE(table->isRadixPartitioned());
   ASSERT_EQ(table->rows()->numRows(), kNumRows);
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
