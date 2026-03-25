@@ -707,6 +707,16 @@ class HashTable : public BaseHashTable {
       bool dropDuplicates = false,
       folly::Executor* executor = nullptr) override;
 
+  bool canBuildRadixPartitions(uint8_t numRadixBits) const;
+
+  void buildRadixPartitions(uint8_t numRadixBits);
+
+  uint32_t getRadixPartition(uint64_t hash) const;
+
+  uint8_t radixPartitionBits() const {
+    return radixPartitionBits_;
+  }
+
   void prepareForJoinProbe(
       HashLookup& lookup,
       const RowVectorPtr& input,
@@ -907,6 +917,10 @@ class HashTable : public BaseHashTable {
   void clearUseRange(std::vector<bool>& useRange);
 
   void rehash(bool initNormalizedKeys, int8_t spillInputStartPartitionBit);
+
+  std::unique_ptr<RowContainer> newRowContainer() const;
+
+  void refreshColumnHasNulls();
 
   uint64_t rehashSize() const {
     return rehashSize(capacity_ - numTombstones_);
@@ -1190,6 +1204,7 @@ class HashTable : public BaseHashTable {
   int64_t numTombstones_{0};
   // Counts the number of rehash() calls.
   int64_t numRehashes_{0};
+  uint8_t radixPartitionBits_{0};
   HashMode hashMode_ = HashMode::kArray;
   // Owns the memory of multiple build side hash join tables that are
   // combined into a single probe hash table.

@@ -71,6 +71,13 @@ class HashTableTestHelper {
         mode, numNew, BaseHashTable::kNoSpillInputStartPartitionBit);
   }
 
+  bool hashRows(
+      folly::Range<char**> rows,
+      bool initNormalizedKeys,
+      raw_vector<uint64_t>& hashes) {
+    return table_->hashRows(rows, initNormalizedKeys, hashes);
+  }
+
  private:
   explicit HashTableTestHelper(HashTable<ignoreNullKeys>* table)
       : table_(table) {
@@ -863,6 +870,65 @@ TEST_P(HashTableTest, regularHashingTableSize) {
   {
     auto type = ROW({"k1", "k2"}, {BIGINT(), BIGINT()});
     checkTableSize(BaseHashTable::HashMode::kNormalizedKey, type);
+  }
+}
+
+TEST_P(HashTableTest, buildRadixPartitions) {
+  auto type = ROW({BIGINT()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      1'000,
+      pool());
+
+  std::vector<RowVectorPtr> batches;
+  constexpr auto kNumRows = 1 << 12;
+  makeRows(kNumRows, 1, 0, type, batches);
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+
+  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  table->buildRadixPartitions(2);
+
+  ASSERT_EQ(table->radixPartitionBits(), 2);
+  ASSERT_EQ(table->rows()->numRows(), kNumRows);
+
+  auto testHelper = HashTableTestHelper<true>::create(table.get());
+  constexpr auto kHashBatchSize = 1024;
+  raw_vector<char*> rows(pool());
+  rows.resize(kNumRows);
+  raw_vector<uint64_t> hashes(pool());
+  hashes.resize(kNumRows);
+
+  RowContainerIterator iterator;
+  vector_size_t numRows = 0;
+  while (auto numListed = table->rows()->listRows(
+             &iterator, kHashBatchSize, rows.data() + numRows)) {
+    raw_vector<uint64_t> batchHashes(pool());
+    batchHashes.resize(kHashBatchSize);
+    ASSERT_TRUE(testHelper.hashRows(
+        folly::Range<char**>(rows.data() + numRows, numListed),
+        false,
+        batchHashes));
+    std::copy_n(batchHashes.data(), numListed, hashes.data() + numRows);
+    numRows += numListed;
+  }
+  ASSERT_EQ(numRows, kNumRows);
+
+  std::vector<vector_size_t> partitionCounts(4, 0);
+  uint32_t previousPartition = 0;
+  for (auto i = 0; i < kNumRows; ++i) {
+    const auto partition = table->getRadixPartition(hashes[i]);
+    if (i > 0) {
+      ASSERT_LE(previousPartition, partition);
+    }
+    previousPartition = partition;
+    ++partitionCounts[partition];
   }
 }
 
