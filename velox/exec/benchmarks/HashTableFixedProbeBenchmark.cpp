@@ -167,8 +167,6 @@ class FixedProbeBenchmark {
     auto lookup = std::make_unique<HashLookup>(table_->hashers(), pool_.get());
     SelectivityInfo hashTime;
     SelectivityInfo probeTime;
-    auto& hashers = table_->hashers();
-    auto mode = table_->hashMode();
     int64_t numHit = 0;
     int64_t numHashed = 0;
     int64_t numProbed = 0;
@@ -180,25 +178,12 @@ class FixedProbeBenchmark {
       fillProbeBatch(offset, batchSize);
 
       SelectivityVector rows(batchSize);
-      lookup->reset(batchSize);
-      numHashed += batchSize;
 
       {
         SelectivityTimer timer(hashTime, 0);
-        for (auto i = 0; i < hashers.size(); ++i) {
-          auto key = probe_->childAt(i);
-          if (mode != BaseHashTable::HashMode::kHash) {
-            hashers[i]->lookupValueIds(
-                *key, rows, lookup->scratchMemory, lookup->hashes);
-          } else {
-            hashers[i]->decode(*key, rows);
-            hashers[i]->hash(rows, i > 0, lookup->hashes);
-          }
-        }
+        table_->prepareForJoinProbe(*lookup, probe_, rows, true);
       }
-
-      lookup->rows.resize(batchSize);
-      std::iota(lookup->rows.begin(), lookup->rows.end(), 0);
+      numHashed += batchSize;
 
       {
         SelectivityTimer timer(probeTime, 0);
