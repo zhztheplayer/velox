@@ -319,6 +319,7 @@ int main(int argc, char** argv) {
   };
   if (FLAGS_build_size != 0) {
     VELOX_CHECK_GE(FLAGS_num_radix_bits, 0, "num_radix_bits must be >= 0");
+    VELOX_CHECK_LE(FLAGS_num_radix_bits, std::numeric_limits<uint8_t>::max(), "num_radix_bits must be <= 255");
     params = {FixedProbeParams(
         "Custom",
         FLAGS_build_size,
