@@ -2862,7 +2862,7 @@ TEST_P(HashJoinTest, duplicateJoinKeys) {
   }
 }
 
-TEST_P(HashJoinTest, radixBuildOnSerialVarcharJoin) {
+TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
   constexpr int32_t kNumBatches = 16;
   constexpr int32_t kRowsPerBatch = 64;
   auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
@@ -2918,11 +2918,30 @@ TEST_P(HashJoinTest, radixBuildOnSerialVarcharJoin) {
                       core::JoinType::kInner)
                   .planNode();
 
+  bool sawFinalHashMode{false};
   bool radixBuildTriggered{false};
   bool radixProbeTriggered{false};
+
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashTable::buildRadixPartitions",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_FALSE(table->isRadixPartitioned());
+        ASSERT_EQ(
+            table->hashMode(), BaseHashTable::HashMode::kHash);
+        radixBuildTriggered = true;
+  }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::afterRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_TRUE(table->isRadixPartitioned());
+        ASSERT_EQ(
+            table->hashMode(), BaseHashTable::HashMode::kHash);
+        sawFinalHashMode = true;
+      }));
   SCOPED_TESTVALUE_SET(
       "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
       std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
@@ -2935,6 +2954,125 @@ TEST_P(HashJoinTest, radixBuildOnSerialVarcharJoin) {
           "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
       .run();
 
+  ASSERT_TRUE(sawFinalHashMode);
+  ASSERT_TRUE(radixBuildTriggered);
+  ASSERT_TRUE(radixProbeTriggered);
+}
+
+TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
+  bool sawFinalHashMode{false};
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_FALSE(table->isRadixPartitioned());
+        ASSERT_EQ(
+            table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
+        radixBuildTriggered = true;
+  }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::afterRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_TRUE(table->isRadixPartitioned());
+        ASSERT_EQ(
+            table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
+        sawFinalHashMode = true;
+      }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .keyTypes({BIGINT(), VARCHAR()})
+      .probeVectors(1600, 5)
+      .buildVectors(1500, 5)
+      .referenceQuery(
+          "SELECT t_k0, t_k1, t_data, u_k0, u_k1, u_data FROM t, u WHERE t_k0 = u_k0 AND t_k1 = u_k1")
+      .run();
+
+  ASSERT_TRUE(sawFinalHashMode);
+  ASSERT_TRUE(radixBuildTriggered);
+  ASSERT_TRUE(radixProbeTriggered);
+}
+
+TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
+  bool sawArrayModeBeforeNormalization{false};
+  bool sawFinalHashMode{false};
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+
+  std::vector<RowVectorPtr> probeVectors;
+  std::vector<RowVectorPtr> buildVectors;
+  for (auto batch = 0; batch < 5; ++batch) {
+    probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<int64_t>(1600, [](auto row) { return row % 256; }),
+        makeFlatVector<int64_t>(1600, [batch](auto row) {
+          return batch * 1600 + row;
+        }),
+    }));
+    buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<int64_t>(1500, [](auto row) { return row % 256; }),
+        makeFlatVector<int64_t>(1500, [batch](auto row) {
+          return batch * 1500 + row;
+        }),
+    }));
+  }
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeForceGenericForRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_FALSE(table->isRadixPartitioned());
+        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
+        sawArrayModeBeforeNormalization = true;
+      }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_FALSE(table->isRadixPartitioned());
+        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+        radixBuildTriggered = true;
+      }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::afterRadixBuild",
+      std::function<void(void*)>([&](void* arg) {
+        auto* table = static_cast<BaseHashTable*>(arg);
+        ASSERT_NE(table, nullptr);
+        ASSERT_TRUE(table->isRadixPartitioned());
+        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+        sawFinalHashMode = true;
+      }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1", "u0", "u1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c0, u.c1 FROM t, u WHERE t.c0 = u.c0")
+      .run();
+
+  ASSERT_TRUE(sawArrayModeBeforeNormalization);
+  ASSERT_TRUE(sawFinalHashMode);
   ASSERT_TRUE(radixBuildTriggered);
   ASSERT_TRUE(radixProbeTriggered);
 }

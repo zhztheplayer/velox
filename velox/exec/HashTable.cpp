@@ -794,7 +794,10 @@ std::unique_ptr<RowContainer> HashTable<ignoreNullKeys>::newRowContainer()
       allowDuplicates_,
       isJoinBuild_,
       rows_->probedFlagOffset() != 0,
-      false,
+      // Radix rebuild may materialize a replacement row container for an
+      // existing normalized-key join table. Preserve normalized-key storage so
+      // the subsequent rebuild can continue to use that mode safely.
+      hashMode_ == HashMode::kNormalizedKey,
       /*useListRowIndex=*/false,
       pool_);
 }
@@ -837,8 +840,6 @@ uint32_t HashTable<ignoreNullKeys>::getRadixPartition(uint64_t hash) const {
 
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
-  TestValue::adjust(
-      "facebook::velox::exec::HashTable::buildRadixPartitions", this);
   VELOX_CHECK(
       canBuildRadixPartitions(numRadixBits),
       "Unsupported radix build configuration: hashMode={}, numRadixBits={}, "
@@ -848,14 +849,6 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
       table_ != nullptr,
       isJoinBuild_,
       otherTables_.size());
-
-  if (hashMode_ == HashMode::kNormalizedKey) {
-    forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
-    VELOX_CHECK_EQ(hashMode_, HashMode::kHash);
-    VELOX_CHECK(
-        canBuildRadixPartitions(numRadixBits),
-        "Failed to enable generic hash mode for radix build");
-  }
 
   radixPartitionBits_ = numRadixBits;
   isRadixPartitioned_ = false;
@@ -880,23 +873,15 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   while (
       auto numRows =
           rows_->listRows(&iterator, kHashBatchSize, rows.data() + rowIndex)) {
-    if (hashMode_ == HashMode::kHash) {
-      VELOX_CHECK(
-          hashRows(
-              folly::Range<char**>(rows.data() + rowIndex, numRows),
-              false,
-              batchHashes),
-          "Failed to hash build rows for radix partitioning");
-    } else {
-      std::fill(batchHashes.begin(), batchHashes.begin() + numRows, 0);
-      for (int32_t i = 0; i < hashers_.size(); ++i) {
-        rows_->hash(
-            i,
+    // Radix ordering must use the same hash basis as the current lookup mode.
+    // For normalized-key tables this is the mixed normalized key, not a fresh
+    // row-value hash.
+    VELOX_CHECK(
+        hashRows(
             folly::Range<char**>(rows.data() + rowIndex, numRows),
-            i > 0,
-            batchHashes.data());
-      }
-    }
+            false,
+            batchHashes),
+        "Failed to hash build rows for radix partitioning");
     std::copy_n(batchHashes.data(), numRows, hashes.data() + rowIndex);
     rowIndex += numRows;
   }
@@ -941,6 +926,9 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
     for (auto i = 0; i < numRows; ++i) {
       auto* newRow = newRows->newRow();
       newRows->storeSerializedRow(*serializedRows, i, newRow);
+      if (nextOffset_) {
+        nextRow(newRow) = nullptr;
+      }
     }
   }
 
@@ -959,7 +947,6 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   }
   numDistinct_ = rows_->numRows();
   numTombstones_ = 0;
-  hashMode_ = HashMode::kHash;
 
   if (numDistinct_ > 0) {
     checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);

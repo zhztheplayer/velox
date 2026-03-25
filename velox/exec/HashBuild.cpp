@@ -894,15 +894,22 @@ bool HashBuild::finishHashBuild() {
   // single-table case. Spilled input and merged peer tables are excluded.
   constexpr uint8_t kRadixPartitionBits = 4;
   if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild) {
-    // The first radix-build iteration only supports the generic hash table
-    // representation, so normalize the build table mode before checking
-    // whether the table can be rebuilt into radix-partitioned form.
-    if (table_->hashMode() != BaseHashTable::HashMode::kHash) {
+    // Array mode has no bucket-addressed layout, so normalize it to generic
+    // hash mode before attempting the radix rebuild. Hash and normalized-key
+    // modes are allowed to proceed directly.
+    if (table_->hashMode() == BaseHashTable::HashMode::kArray) {
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::beforeForceGenericForRadixBuild",
+          table_.get());
       table_->forceGenericHashMode(
           BaseHashTable::kNoSpillInputStartPartitionBit);
     }
     if (table_->canBuildRadixPartitions(kRadixPartitionBits)) {
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
       table_->buildRadixPartitions(kRadixPartitionBits);
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
     }
   }
   stats_.wlock()->addRuntimeStat(

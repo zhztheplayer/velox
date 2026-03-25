@@ -153,8 +153,6 @@ class FixedProbeBenchmark {
         1'000'000,
         false,
         nullptr);
-    table_->forceGenericHashMode(
-        BaseHashTable::kNoSpillInputStartPartitionBit);
     if (radixEnabled) {
       table_->buildRadixPartitions(params_.numRadixBits);
     }
