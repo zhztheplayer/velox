@@ -19,6 +19,7 @@
 #include <numeric>
 #include <sstream>
 #include <iostream>
+#include <chrono>
 
 #include <folly/Benchmark.h>
 #include <folly/init/Init.h>
@@ -44,6 +45,16 @@ DEFINE_int64(
     num_radix_bits,
     0,
     "Number of radix bits to build. Use 0 to disable radix.");
+DEFINE_int64(
+    partition_switch_distance,
+    1,
+    "Number of consecutive probe batches to issue against one radix "
+    "partition before switching to the next partition. Ignored when "
+    "num_radix_bits is 0.");
+DEFINE_bool(
+    log_batch_probe_times,
+    true,
+    "Whether to record and print one probe time entry per batch.");
 
 using namespace facebook::velox;
 using namespace facebook::velox::exec;
@@ -56,18 +67,25 @@ struct FixedProbeParams {
   int64_t buildSize;
   int64_t probeSize;
   uint8_t numRadixBits;
+  int64_t partitionSwitchDistance;
 
   FixedProbeParams(
       std::string title,
       int64_t buildSize,
       int64_t probeSize,
-      uint8_t numRadixBits)
+      uint8_t numRadixBits,
+      int64_t partitionSwitchDistance)
       : title(std::move(title)),
         buildSize(buildSize),
         probeSize(probeSize),
-        numRadixBits(numRadixBits) {
+        numRadixBits(numRadixBits),
+        partitionSwitchDistance(partitionSwitchDistance) {
     VELOX_CHECK_GE(buildSize, 1, "buildSize must be positive");
     VELOX_CHECK_GE(probeSize, 1, "probeSize must be positive");
+    VELOX_CHECK_GE(
+        partitionSwitchDistance,
+        1,
+        "partitionSwitchDistance must be positive");
     VELOX_CHECK_GE(
         probeSize,
         buildSize,
@@ -76,16 +94,22 @@ struct FixedProbeParams {
 
   std::string toString() const {
     return fmt::format(
-        "{}: BuildRows={} ProbeRows={} RadixBits={}",
+        "{}: BuildRows={} ProbeRows={} RadixBits={} SwitchDistance={}",
         title,
         buildSize,
         probeSize,
-        numRadixBits);
+        numRadixBits,
+        partitionSwitchDistance);
   }
 };
 
 struct FixedProbeResult {
-  FixedProbeParams params{"default", 1, 2, 0};
+  struct BatchProbeStat {
+    int32_t partition;
+    int64_t probeNanos;
+  };
+
+  FixedProbeParams params{"default", 1, 2, 0, 1};
   int64_t numHashed{0};
   int64_t numProbed{0};
   int64_t numHit{0};
@@ -96,12 +120,13 @@ struct FixedProbeResult {
   int64_t bucketBytes{0};
   int64_t rowBytes{0};
   BaseHashTable::HashMode mode{BaseHashTable::HashMode::kHash};
+  std::vector<BatchProbeStat> batchProbeStats;
 
   std::string toString() const {
     std::stringstream out;
     out << params.toString() << '\n'
         << fmt::format(
-               "Hashed: {} Probed: {} Hit: {} Mode: {} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {}",
+               "Hashed: {} Probed: {} Hit: {} Mode: {} Hash time/row {} probe time/row {} bucketBytes {} rowBytes {} NumRadixPartitions {}",
                numHashed,
                numProbed,
                numHit,
@@ -109,9 +134,18 @@ struct FixedProbeResult {
                hashClocks,
                probeClocks,
                bucketBytes,
-               rowBytes)
+               rowBytes,
+               1 << params.numRadixBits)
         << '\n'
         << " numDistinct=" << numDistinct << " sizeBytes=" << sizeBytes;
+    if (!batchProbeStats.empty()) {
+      out << '\n' << " batchProbeStats:";
+      for (auto i = 0; i < batchProbeStats.size(); ++i) {
+        out << '\n' << "  batch=" << i << " partition="
+            << batchProbeStats[i].partition
+            << " probeNanos=" << batchProbeStats[i].probeNanos;
+      }
+    }
     return out.str();
   }
 };
@@ -158,6 +192,7 @@ class FixedProbeBenchmark {
       table_->buildRadixPartitions(params_.numRadixBits);
     }
     buildExpectedHits();
+    buildPartitionKeys();
   }
 
   FixedProbeResult run() {
@@ -175,7 +210,8 @@ class FixedProbeBenchmark {
          offset += probeKeys_->size()) {
       const auto batchSize =
           std::min<int64_t>(probeKeys_->size(), params_.probeSize - offset);
-      fillProbeBatch(offset, batchSize);
+      const auto batchIndex = offset / probeKeys_->size();
+      fillProbeBatch(batchIndex, offset, batchSize);
 
       SelectivityVector rows(batchSize);
 
@@ -187,14 +223,22 @@ class FixedProbeBenchmark {
 
       {
         SelectivityTimer timer(probeTime, 0);
+        const auto start = std::chrono::steady_clock::now();
         table_->joinProbe(*lookup);
+        if (FLAGS_log_batch_probe_times) {
+          const auto elapsed = std::chrono::steady_clock::now() - start;
+          result.batchProbeStats.push_back({
+              activePartition(batchIndex),
+              std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed)
+                  .count()});
+        }
       }
       numProbed += batchSize;
 
       for (auto row = 0; row < batchSize; ++row) {
         numHit += lookup->hits[row] != nullptr;
         VELOX_CHECK_EQ(
-            expectedHits_[(offset + row) % params_.buildSize], lookup->hits[row]);
+            expectedHits_[probeKeys_->valueAt(row)], lookup->hits[row]);
       }
     }
     VELOX_CHECK_EQ(numHit, params_.probeSize);
@@ -236,13 +280,30 @@ class FixedProbeBenchmark {
     }
   }
 
-  void fillProbeBatch(int64_t offset, int64_t batchSize) {
+  void fillProbeBatch(int64_t batchIndex, int64_t offset, int64_t batchSize) {
     probeKeys_->resize(batchSize);
     probe_->resize(batchSize);
     for (vector_size_t row = 0; row < batchSize; ++row) {
-      const auto probeRow = offset + row;
-      probeKeys_->set(row, probeRow % params_.buildSize);
+      if (!partitionKeys_.empty()) {
+        const auto probeRow = offset + row;
+        const auto partitionIndex = activePartition(batchIndex);
+        probeKeys_->set(
+            row,
+            partitionKeys_[partitionIndex][
+                probeRow % partitionKeys_[partitionIndex].size()]);
+      } else {
+        const auto probeRow = offset + row;
+        probeKeys_->set(row, probeRow % params_.buildSize);
+      }
     }
+  }
+
+  int32_t activePartition(int64_t batchIndex) const {
+    if (partitionKeys_.empty()) {
+      return 0;
+    }
+    return (batchIndex / params_.partitionSwitchDistance) %
+        partitionKeys_.size();
   }
 
   void buildExpectedHits() {
@@ -275,6 +336,32 @@ class FixedProbeBenchmark {
     }
   }
 
+  void buildPartitionKeys() {
+    partitionKeys_.clear();
+    if (params_.numRadixBits == 0) {
+      return;
+    }
+
+    const auto numPartitions = 1U << params_.numRadixBits;
+    partitionKeys_.resize(numPartitions);
+
+    HashLookup lookup(table_->hashers(), pool_.get());
+    SelectivityVector rows(build_->size());
+    table_->prepareForJoinProbe(lookup, build_, rows, true);
+
+    auto buildKeys = build_->childAt(0)->asFlatVector<int64_t>();
+    for (vector_size_t row = 0; row < build_->size(); ++row) {
+      const auto partition = table_->getRadixPartition(lookup.hashes[row]);
+      partitionKeys_[partition].push_back(buildKeys->valueAt(row));
+    }
+    for (auto partition = 0; partition < numPartitions; ++partition) {
+      VELOX_CHECK(
+          !partitionKeys_[partition].empty(),
+          "Expected at least one key in radix partition {}",
+          partition);
+    }
+  }
+
   std::shared_ptr<memory::MemoryPool> pool_{
       memory::memoryManager()->addLeafPool()};
   VectorMaker vectorMaker_{pool_.get()};
@@ -283,8 +370,9 @@ class FixedProbeBenchmark {
   FlatVectorPtr<int64_t> probeKeys_;
   std::vector<char*> buildRows_;
   std::vector<char*> expectedHits_;
+  std::vector<std::vector<int64_t>> partitionKeys_;
   std::unique_ptr<HashTable<true>> table_;
-  FixedProbeParams params_{"default", 1, 2, 0};
+  FixedProbeParams params_{"default", 1, 2, 0, 1};
 };
 
 void combineResults(
@@ -312,38 +400,60 @@ int main(int argc, char** argv) {
   std::vector<FixedProbeResult> results;
 
   std::vector<FixedProbeParams> params = {
-      FixedProbeParams("Probe1GTable128B", 1 << 7, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable256B", 1 << 8, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable512B", 1 << 9, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable1K", 1 << 10, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable2K", 1 << 11, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable4K", 1 << 12, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable8K", 1 << 13, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable16K", 1 << 14, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable32K", 1 << 15, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable64K", 1 << 16, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable128K", 1 << 17, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable256K", 1 << 18, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable512K", 1 << 19, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable1M", 1 << 20, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable2M", 1 << 21, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable4M", 1 << 22, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable8M", 1 << 23, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable16M", 1 << 24, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable32M", 1 << 25, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable64M", 1 << 26, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable128M", 1 << 27, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30, 0),
-      FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable128B", 1 << 7, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable256B", 1 << 8, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable512B", 1 << 9, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable1K", 1 << 10, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable2K", 1 << 11, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable4K", 1 << 12, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable8K", 1 << 13, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable16K", 1 << 14, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable32K", 1 << 15, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable64K", 1 << 16, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable128K", 1 << 17, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable256K", 1 << 18, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable512K", 1 << 19, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable1M", 1 << 20, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable2M", 1 << 21, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable4M", 1 << 22, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable8M", 1 << 23, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable16M", 1 << 24, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable32M", 1 << 25, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable64M", 1 << 26, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable128M", 1 << 27, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable256M", 1 << 28, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable512M", 1 << 29, 1 << 30, 0),
+
+      // FixedProbeParams("Probe1GTable256K0", 1 << 18, 1 << 30, 0),
+      // FixedProbeParams("Probe1GTable256K1", 1 << 18, 1 << 30, 1),
+      // FixedProbeParams("Probe1GTable256K2", 1 << 18, 1 << 30, 2),
+      // FixedProbeParams("Probe1GTable256K3", 1 << 18, 1 << 30, 3),
+
+      // FixedProbeParams("Probe1GTable4M0", 1 << 22, 1 << 30, 0, 1),
+      // FixedProbeParams("Probe1GTable4M1", 1 << 22, 1 << 30, 1, 1),
+      // FixedProbeParams("Probe1GTable4M2", 1 << 22, 1 << 30, 2, 1),
+      // FixedProbeParams("Probe1GTable4M3/64", 1 << 22, 1 << 30, 3, 64),
+      // FixedProbeParams("Probe1GTable4M3/128", 1 << 22, 1 << 30, 3, 128),
+      // FixedProbeParams("Probe1GTable4M3/256", 1 << 22, 1 << 30, 3, 256),
+      // FixedProbeParams("Probe1GTable4M3/512", 1 << 22, 1 << 30, 3, 512),
+      // FixedProbeParams("Probe1GTable4M3/1024", 1 << 22, 1 << 30, 3, 1024),
+      // FixedProbeParams("Probe1GTable4M3/2048", 1 << 22, 1 << 30, 3, 2048),
+
+      FixedProbeParams("CUSTOM", 1 << 22, 1 << 30, 3, 8192),
   };
   if (FLAGS_build_size != 0) {
     VELOX_CHECK_GE(FLAGS_num_radix_bits, 0, "num_radix_bits must be >= 0");
     VELOX_CHECK_LE(FLAGS_num_radix_bits, std::numeric_limits<uint8_t>::max(), "num_radix_bits must be <= 255");
+    VELOX_CHECK_GE(
+        FLAGS_partition_switch_distance,
+        1,
+        "partition_switch_distance must be >= 1");
     params = {FixedProbeParams(
         "Custom",
         FLAGS_build_size,
         FLAGS_probe_size,
-        static_cast<uint8_t>(FLAGS_num_radix_bits))};
+        static_cast<uint8_t>(FLAGS_num_radix_bits),
+        FLAGS_partition_switch_distance)};
   }
 
   for (const auto& param : params) {
