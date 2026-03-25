@@ -185,11 +185,14 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
   GTest::gmock
-  Folly::folly
   gflags::gflags
   glog::glog
   fmt::fmt
 )
+
+if(NOT VELOX_BUILD_SHARED)
+  target_link_libraries(velox_exec_test Folly::folly)
+endif()
 
 target_link_libraries(
   velox_exec_infra_test
