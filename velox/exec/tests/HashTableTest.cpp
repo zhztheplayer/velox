@@ -15,6 +15,7 @@
  */
 
 #include "velox/exec/HashTable.h"
+#include "velox/exec/RadixPartitioner.h"
 #include "folly/experimental/EventCount.h"
 #include "velox/common/base/SelectivityInfo.h"
 #include "velox/common/base/tests/GTestUtils.h"
@@ -918,22 +919,35 @@ void assertProbeRowsClusteredByRadixPartition(
     bool requireAllPartitionsNonEmpty = true) {
   auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
   ASSERT_NE(concreteTable, nullptr);
-  HashLookup lookup(table->hashers(), pool);
-  SelectivityVector rows(probeBatch->size());
-  table->prepareForJoinProbe(lookup, probeBatch, rows, true);
+  auto partitioner = RadixPartitioner::createWrapped(*table, 1, pool);
+  partitioner->addInput(probeBatch);
+  partitioner->forceCollectAll();
 
-  ASSERT_FALSE(lookup.rows.empty());
   std::vector<vector_size_t> partitionCounts(4, 0);
+  vector_size_t totalRows = 0;
   uint32_t previousPartition = 0;
-  for (auto i = 0; i < lookup.rows.size(); ++i) {
-    const auto row = lookup.rows[i];
-    const auto partition = concreteTable->getRadixPartition(lookup.hashes[row]);
-    if (i > 0) {
+  bool sawAnyOutput = false;
+  while (auto output = partitioner->collect()) {
+    HashLookup lookup(table->hashers(), pool);
+    SelectivityVector rows(output->size());
+    table->prepareForJoinProbe(lookup, output, rows, true);
+
+    ASSERT_FALSE(lookup.rows.empty());
+    const auto partition =
+        concreteTable->getRadixPartition(lookup.hashes[lookup.rows[0]]);
+    if (sawAnyOutput) {
       ASSERT_LE(previousPartition, partition);
     }
     previousPartition = partition;
     ++partitionCounts[partition];
+    sawAnyOutput = true;
+    totalRows += output->size();
+    for (auto row : lookup.rows) {
+      ASSERT_EQ(partition, concreteTable->getRadixPartition(lookup.hashes[row]));
+    }
   }
+  ASSERT_TRUE(sawAnyOutput);
+  ASSERT_EQ(totalRows, probeBatch->size());
   if (requireAllPartitionsNonEmpty) {
     for (auto count : partitionCounts) {
       ASSERT_GT(count, 0);
@@ -974,6 +988,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromHash) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(table.get(), batches[0], pool());
 }
 
 TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
@@ -1013,6 +1028,8 @@ TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(
+      table.get(), buildBatch, pool(), false);
 }
 
 TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
@@ -1049,6 +1066,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(table.get(), buildBatch, pool());
 }
 
 TEST_P(HashTableTest, listJoinResultsSize) {
