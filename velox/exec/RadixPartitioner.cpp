@@ -86,7 +86,7 @@ class RadixPartitionerBase : public RadixPartitioner {
     }
   }
 
-  RowVectorPtr collect() override {
+  RowVectorPtr getOutput() override {
     if (readyPartitions_.empty()) {
       return nullptr;
     }
@@ -101,8 +101,8 @@ class RadixPartitionerBase : public RadixPartitioner {
     queue.pop_front();
     bufferedRowsPerPartition_[partition] -= output->size();
     if (!queue.empty() &&
-        (forceCollectAll_ ||
-         bufferedRowsPerPartition_[partition] >= numAccumulatedRows_)) {
+        (bufferedRowsPerPartition_[partition] >= numAccumulatedRows_ ||
+         noMoreInput_)) {
       markReady(partition);
     }
     common::testutil::TestValue::adjust(
@@ -110,10 +110,11 @@ class RadixPartitionerBase : public RadixPartitioner {
     return output;
   }
 
-  void forceCollectAll() override {
-    forceCollectAll_ = true;
+  void noMoreInput() override {
+    noMoreInput_ = true;
     for (auto partition = 0; partition < numPartitions(); ++partition) {
-      if (!partitionQueues_[partition].empty()) {
+      auto& queue = partitionQueues_[partition];
+      if (!queue.empty()) {
         markReady(partition);
       }
     }
@@ -201,7 +202,7 @@ class RadixPartitionerBase : public RadixPartitioner {
   std::vector<std::deque<RowVectorPtr>> partitionQueues_;
   std::vector<bool> partitionReady_;
   std::deque<int32_t> readyPartitions_;
-  bool forceCollectAll_{false};
+  bool noMoreInput_{false};
 };
 
 class WrappedRadixPartitioner final : public RadixPartitionerBase {

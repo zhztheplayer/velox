@@ -24,9 +24,9 @@ class RadixPartitioner {
 
   virtual void addInput(RowVectorPtr input) = 0;
 
-  virtual RowVectorPtr collect() = 0;
+  virtual RowVectorPtr getOutput() = 0;
 
-  virtual void forceCollectAll() = 0;
+  virtual void noMoreInput() = 0;
 
   virtual bool hasReadyOutput() const = 0;
 

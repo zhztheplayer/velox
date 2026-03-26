@@ -68,16 +68,16 @@ class RadixPartitionerTest : public testing::Test,
       BaseHashTable& table,
       RadixPartitioner& partitioner,
       vector_size_t expectedRows,
-      bool expectReadyBeforeForceCollectAll) {
-    if (expectReadyBeforeForceCollectAll) {
+      bool expectReadyBeforeNoMoreInput) {
+    if (expectReadyBeforeNoMoreInput) {
       ASSERT_TRUE(partitioner.hasReadyOutput());
     } else {
       ASSERT_FALSE(partitioner.hasReadyOutput());
     }
+    partitioner.noMoreInput();
 
     vector_size_t totalRows = 0;
-    partitioner.forceCollectAll();
-    while (auto output = partitioner.collect()) {
+    while (auto output = partitioner.getOutput()) {
       totalRows += output->size();
 
       HashLookup lookup(table.hashers(), pool());

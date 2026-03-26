@@ -699,16 +699,11 @@ bool HashProbe::maybeLoadRadixPartitionedInput() {
     return input_ != nullptr;
   }
 
-  input_ = radixPartitioner_->collect();
+  input_ = radixPartitioner_->getOutput();
   if (input_ != nullptr) {
     decodeAndDetectNonNullKeys();
     prepareInputForProbe();
     return input_ != nullptr;
-  }
-
-  if (pendingRadixNoMoreInput_) {
-    pendingRadixNoMoreInput_ = false;
-    noMoreInputInternal();
   }
   return false;
 }
@@ -1099,6 +1094,10 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
   clearProjectedOutput();
 
   maybeLoadRadixPartitionedInput();
+  if (!input_ && radixPartitioner_ != nullptr && noMoreInput_ &&
+      !noMoreSpillInput_) {
+    noMoreInputInternal();
+  }
 
   if (!input_) {
     if (hasMoreInput()) {
@@ -1771,9 +1770,11 @@ void HashProbe::ensureLoaded(column_index_t channel) {
 void HashProbe::noMoreInput() {
   Operator::noMoreInput();
   if (radixPartitioner_ != nullptr) {
-    radixPartitioner_->forceCollectAll();
-    pendingRadixNoMoreInput_ = true;
+    radixPartitioner_->noMoreInput();
     maybeLoadRadixPartitionedInput();
+    if (!input_ && !noMoreSpillInput_) {
+      noMoreInputInternal();
+    }
     return;
   }
   noMoreInputInternal();

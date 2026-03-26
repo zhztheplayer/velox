@@ -62,7 +62,7 @@ class EagerPassThroughRadixPartitioner final : public RadixPartitioner {
     queue_.push_back(std::move(input));
   }
 
-  RowVectorPtr collect() override {
+  RowVectorPtr getOutput() override {
     if (queue_.empty()) {
       return nullptr;
     }
@@ -71,7 +71,7 @@ class EagerPassThroughRadixPartitioner final : public RadixPartitioner {
     return output;
   }
 
-  void forceCollectAll() override {}
+  void noMoreInput() override {}
 
   bool hasReadyOutput() const override {
     return !queue_.empty();
@@ -210,6 +210,33 @@ class FixedProbeBenchmark {
     int64_t numHashed = 0;
     int64_t numProbed = 0;
 
+    auto processPartitionedInput = [&](const RowVectorPtr& partitionedInput) {
+      const auto inputSize = partitionedInput->size();
+      SelectivityVector rows(inputSize);
+
+      {
+        SelectivityTimer timer(hashTime, 0);
+        table_->prepareForJoinProbe(*lookup, partitionedInput, rows, true);
+      }
+      numHashed += inputSize;
+
+      {
+        SelectivityTimer timer(probeTime, 0);
+        table_->joinProbe(*lookup);
+      }
+      numProbed += inputSize;
+
+      DecodedVector decodedKeys;
+      decodedKeys.decode(*partitionedInput->childAt(0), rows);
+      for (auto row = 0; row < inputSize; ++row) {
+        const auto key = decodedKeys.valueAt<int64_t>(row);
+        numHit += lookup->hits[row] != nullptr;
+        VELOX_CHECK_GE(key, 0);
+        VELOX_CHECK_LT(key, params_.buildSize);
+        VELOX_CHECK_EQ(expectedHits_[key], lookup->hits[row]);
+      }
+    };
+
     for (int64_t offset = 0; offset < params_.probeSize;
          offset += probeKeys_->size()) {
       const auto batchSize =
@@ -217,32 +244,14 @@ class FixedProbeBenchmark {
       fillProbeBatch(offset, batchSize);
       probePartitioner_->addInput(probe_);
 
-      while (auto partitionedInput = probePartitioner_->collect()) {
-        const auto inputSize = partitionedInput->size();
-        SelectivityVector rows(inputSize);
-
-        {
-          SelectivityTimer timer(hashTime, 0);
-          table_->prepareForJoinProbe(*lookup, partitionedInput, rows, true);
-        }
-        numHashed += inputSize;
-
-        {
-          SelectivityTimer timer(probeTime, 0);
-          table_->joinProbe(*lookup);
-        }
-        numProbed += inputSize;
-
-        DecodedVector decodedKeys;
-        decodedKeys.decode(*partitionedInput->childAt(0), rows);
-        for (auto row = 0; row < inputSize; ++row) {
-          const auto key = decodedKeys.valueAt<int64_t>(row);
-          numHit += lookup->hits[row] != nullptr;
-          VELOX_CHECK_GE(key, 0);
-          VELOX_CHECK_LT(key, params_.buildSize);
-          VELOX_CHECK_EQ(expectedHits_[key], lookup->hits[row]);
-        }
+      while (auto partitionedInput = probePartitioner_->getOutput()) {
+        processPartitionedInput(partitionedInput);
       }
+    }
+    probePartitioner_->noMoreInput();
+
+    while (auto partitionedInput = probePartitioner_->getOutput()) {
+      processPartitionedInput(partitionedInput);
     }
     VELOX_CHECK_EQ(numHit, params_.probeSize);
 

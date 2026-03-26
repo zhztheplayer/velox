@@ -453,8 +453,6 @@ class HashProbe : public Operator {
 
   std::unique_ptr<RadixPartitioner> radixPartitioner_;
 
-  bool pendingRadixNoMoreInput_{false};
-
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};
 

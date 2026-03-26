@@ -921,13 +921,13 @@ void assertProbeRowsClusteredByRadixPartition(
   ASSERT_NE(concreteTable, nullptr);
   auto partitioner = RadixPartitioner::createWrapped(*table, 1, pool);
   partitioner->addInput(probeBatch);
-  partitioner->forceCollectAll();
+  partitioner->noMoreInput();
 
   std::vector<vector_size_t> partitionCounts(4, 0);
   vector_size_t totalRows = 0;
   uint32_t previousPartition = 0;
   bool sawAnyOutput = false;
-  while (auto output = partitioner->collect()) {
+  while (auto output = partitioner->getOutput()) {
     HashLookup lookup(table->hashers(), pool);
     SelectivityVector rows(output->size());
     table->prepareForJoinProbe(lookup, output, rows, true);
