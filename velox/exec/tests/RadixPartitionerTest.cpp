@@ -32,7 +32,13 @@ class RadixPartitionerTest : public testing::Test,
     std::vector<std::unique_ptr<VectorHasher>> keyHashers;
     keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
     auto table = HashTable<true>::createForJoin(
-        std::move(keyHashers), {}, true, false, 1'000, pool());
+        std::move(keyHashers),
+        {},
+        true,
+        false,
+        false,
+        1'000,
+        pool());
 
     auto batch = makeRowVector(std::vector<VectorPtr>{
         makeFlatVector<int64_t>(1 << 12, [](auto row) { return row; }),

@@ -964,6 +964,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromHash) {
       std::vector<TypePtr>{},
       true,
       false,
+      false,
       1'000,
       pool());
 
@@ -998,6 +999,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
       std::move(keyHashers),
       std::vector<TypePtr>{},
       true,
+      false,
       false,
       1'000,
       pool());
@@ -1038,6 +1040,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
       std::move(keyHashers),
       std::vector<TypePtr>{},
       true,
+      false,
       false,
       1'000,
       pool());

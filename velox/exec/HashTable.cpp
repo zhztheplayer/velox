@@ -796,6 +796,7 @@ std::unique_ptr<RowContainer> HashTable<ignoreNullKeys>::newRowContainer()
       allowDuplicates_,
       isJoinBuild_,
       rows_->probedFlagOffset() != 0,
+      /*hasCountFlag=*/false,
       // Radix rebuild may materialize a replacement row container for an
       // existing normalized-key join table. Preserve normalized-key storage so
       // the subsequent rebuild can continue to use that mode safely.

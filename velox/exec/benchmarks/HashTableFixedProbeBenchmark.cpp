@@ -178,6 +178,7 @@ class FixedProbeBenchmark {
         dependentTypes,
         true,
         false,
+        false,
         1'000,
         pool_.get());
 
