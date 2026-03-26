@@ -157,6 +157,7 @@ set(
   GTest::gtest
   GTest::gtest_main
   GTest::gmock
+  Folly::folly
   gflags::gflags
   glog::glog
   fmt::fmt
@@ -169,10 +170,6 @@ velox_add_grouped_tests(
   EXTRA_SOURCES Main.cpp
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
-
-if(NOT VELOX_BUILD_SHARED)
-  target_link_libraries(velox_exec_test Folly::folly)
-endif()
 
 if(VELOX_ENABLE_GEO)
   add_executable(velox_exec_SpatialJoinTest SpatialJoinTest.cpp Main.cpp)
@@ -204,6 +201,7 @@ add_test(
   COMMAND velox_exec_infra_test
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
 target_link_libraries(
   velox_exec_infra_test
   velox_dwio_common
