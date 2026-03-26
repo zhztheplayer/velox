@@ -68,16 +68,19 @@ class RadixPartitionerTest : public testing::Test,
       BaseHashTable& table,
       RadixPartitioner& partitioner,
       vector_size_t expectedRows,
-      bool expectReadyBeforeNoMoreInput) {
-    if (expectReadyBeforeNoMoreInput) {
-      ASSERT_TRUE(partitioner.hasReadyOutput());
+      bool expectOutputBeforeNoMoreInput) {
+    RowVectorPtr firstOutput;
+    if (expectOutputBeforeNoMoreInput) {
+      firstOutput = partitioner.getOutput();
+      ASSERT_NE(firstOutput, nullptr);
     } else {
-      ASSERT_FALSE(partitioner.hasReadyOutput());
+      ASSERT_EQ(partitioner.getOutput(), nullptr);
     }
     partitioner.noMoreInput();
 
     vector_size_t totalRows = 0;
-    while (auto output = partitioner.getOutput()) {
+    for (auto output = std::move(firstOutput); output != nullptr;
+         output = partitioner.getOutput()) {
       totalRows += output->size();
 
       HashLookup lookup(table.hashers(), pool());
@@ -109,7 +112,6 @@ TEST_F(RadixPartitionerTest, wrapped) {
       })});
 
   partitioner->addInput(first);
-  ASSERT_TRUE(partitioner->hasReadyOutput());
   partitioner->addInput(second);
   assertPartitionedOutput(*table, *partitioner, 256, true);
 }
