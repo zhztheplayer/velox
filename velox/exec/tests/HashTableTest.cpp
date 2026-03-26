@@ -919,7 +919,7 @@ void assertProbeRowsClusteredByRadixPartition(
     bool requireAllPartitionsNonEmpty = true) {
   auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
   ASSERT_NE(concreteTable, nullptr);
-  auto partitioner = RadixPartitioner::createWrapped(*table, 1, pool);
+  auto partitioner = RadixPartitioner::createWrapped(*table, 1, 1, pool);
   partitioner->addInput(probeBatch);
   partitioner->noMoreInput();
 

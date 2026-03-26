@@ -97,7 +97,7 @@ class RadixPartitionerTest : public testing::Test,
 
 TEST_F(RadixPartitionerTest, wrapped) {
   auto table = makeRadixTable();
-  auto partitioner = RadixPartitioner::createWrapped(*table, 1, pool());
+  auto partitioner = RadixPartitioner::createWrapped(*table, 1, 1, pool());
 
   auto first = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(128, [](auto row) {
@@ -114,9 +114,9 @@ TEST_F(RadixPartitionerTest, wrapped) {
   assertPartitionedOutput(*table, *partitioner, 256, true);
 }
 
-TEST_F(RadixPartitionerTest, copied) {
+TEST_F(RadixPartitionerTest, wrappedMinBatchSize) {
   auto table = makeRadixTable();
-  auto partitioner = RadixPartitioner::createCopied(*table, 1'000, pool());
+  auto partitioner = RadixPartitioner::createWrapped(*table, 1, 100, pool());
 
   auto input = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(64, [](auto row) {
@@ -124,7 +124,7 @@ TEST_F(RadixPartitionerTest, copied) {
       })});
 
   partitioner->addInput(input);
-  assertPartitionedOutput(*table, *partitioner, 64, false);
+  assertPartitionedOutput(*table, *partitioner, 64, true);
 }
 
 } // namespace
