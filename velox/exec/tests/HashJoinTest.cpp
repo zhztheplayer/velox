@@ -2943,7 +2943,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
         sawFinalHashMode = true;
       }));
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      "facebook::velox::exec::RadixPartitioner::collect",
       std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
 
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
@@ -2985,7 +2985,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
         sawFinalHashMode = true;
       }));
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      "facebook::velox::exec::RadixPartitioner::collect",
       std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
 
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
@@ -3054,7 +3054,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
         sawFinalHashMode = true;
       }));
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashTable::prepareForJoinProbe::radix",
+      "facebook::velox::exec::RadixPartitioner::collect",
       std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
 
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())

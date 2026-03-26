@@ -377,6 +377,8 @@ class BaseHashTable {
 
   virtual void buildRadixPartitions(uint8_t numRadixBits) = 0;
 
+  virtual uint32_t getRadixPartition(uint64_t hash) const = 0;
+
   virtual uint8_t radixPartitionBits() const = 0;
 
   virtual bool isRadixPartitioned() const = 0;
@@ -719,7 +721,7 @@ class HashTable : public BaseHashTable {
 
   void buildRadixPartitions(uint8_t numRadixBits) override;
 
-  uint32_t getRadixPartition(uint64_t hash) const;
+  uint32_t getRadixPartition(uint64_t hash) const override;
 
   uint8_t radixPartitionBits() const override {
     return radixPartitionBits_;

@@ -32,6 +32,7 @@ namespace {
 
 // Batch size used when iterating the row container.
 constexpr int kBatchSize = 1024;
+constexpr vector_size_t kRadixProbeNumAccumulatedRows = 1'000'000;
 } // namespace
 
 // static
@@ -452,6 +453,14 @@ void HashProbe::asyncWaitForHashTable() {
 
   VELOX_CHECK_NOT_NULL(table_);
 
+  if (table_->isRadixPartitioned() && !canSpill()) {
+    // Keep radix-partitioned probe buffering on the simple in-memory path.
+    radixPartitioner_ = RadixPartitioner::createWrapped(
+        *table_, kRadixProbeNumAccumulatedRows, pool());
+  } else {
+    radixPartitioner_.reset();
+  }
+
   maybeSetupSpillInputReader(hashBuildResult->restoredPartitionId);
   maybeSetupInputSpiller(hashBuildResult->spillPartitionIds);
   checkMaxSpillLevel(hashBuildResult->restoredPartitionId);
@@ -685,26 +694,83 @@ void HashProbe::decodeAndDetectNonNullKeys() {
   }
 }
 
+bool HashProbe::maybeLoadRadixPartitionedInput() {
+  if (input_ != nullptr || radixPartitioner_ == nullptr) {
+    return input_ != nullptr;
+  }
+
+  input_ = radixPartitioner_->collect();
+  if (input_ != nullptr) {
+    decodeAndDetectNonNullKeys();
+    prepareInputForProbe();
+    return input_ != nullptr;
+  }
+
+  if (pendingRadixNoMoreInput_) {
+    pendingRadixNoMoreInput_ = false;
+    noMoreInputInternal();
+  }
+  return false;
+}
+
+void HashProbe::prepareInputForProbe() {
+  activeRows_ = nonNullInputRows_;
+
+  {
+    auto lockedStats = stats_.wlock();
+    lockedStats->numNullKeys +=
+        activeRows_.size() - activeRows_.countSelected();
+  }
+
+  table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
+
+  const auto numInput = input_->size();
+  if (joinIncludesMissesFromLeft(joinType_)) {
+    auto& hits = lookup_->hits;
+    hits.resize(numInput);
+    std::fill(hits.data(), hits.data() + numInput, nullptr);
+    if (!lookup_->rows.empty()) {
+      table_->joinProbe(*lookup_);
+    }
+
+    auto& rows = lookup_->rows;
+    rows.resize(numInput);
+    std::iota(rows.begin(), rows.end(), 0);
+  } else {
+    if (lookup_->rows.empty()) {
+      input_ = nullptr;
+      return;
+    }
+    lookup_->hits.resize(lookup_->rows.back() + 1);
+    table_->joinProbe(*lookup_);
+  }
+
+  resultIter_->reset(*lookup_);
+}
+
 void HashProbe::addInput(RowVectorPtr input) {
   if (skipInput_) {
     VELOX_CHECK_NULL(input_);
     return;
   }
-  input_ = std::move(input);
+  auto rawInput = std::move(input);
 
   // Reset passingInputRowsInitialized_ as input_ as changed.
   passingInputRowsInitialized_ = false;
 
-  const auto numInput = input_->size();
+  const auto numInput = rawInput->size();
 
   if (numInput > 0) {
     noInput_ = false;
   }
 
   if (canReplaceWithDynamicFilter_) {
+    input_ = std::move(rawInput);
     replacedWithDynamicFilter_ = true;
     return;
   }
+
+  input_ = std::move(rawInput);
 
   bool hasDecoded = false;
 
@@ -741,51 +807,17 @@ void HashProbe::addInput(RowVectorPtr input) {
     return;
   }
 
-  if (!hasDecoded) {
-    decodeAndDetectNonNullKeys();
-  }
-  activeRows_ = nonNullInputRows_;
-
-  // Update statistics for null keys in join operator.
-  // Updating here means we will report 0 null keys when build side is empty.
-  // If we want more accurate stats, we will have to decode input vector
-  // even when not needed. So we tradeoff less accurate stats for more
-  // performance.
-  {
-    auto lockedStats = stats_.wlock();
-    lockedStats->numNullKeys +=
-        activeRows_.size() - activeRows_.countSelected();
-  }
-
-  table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
-
-  if (joinIncludesMissesFromLeft(joinType_)) {
-    // Make sure to allocate an entry in 'hits' for every input row to allow for
-    // including rows without a match in the output. Also, make sure to
-    // initialize all 'hits' to nullptr as HashTable::joinProbe will only
-    // process activeRows_.
-    auto& hits = lookup_->hits;
-    hits.resize(numInput);
-    std::fill(hits.data(), hits.data() + numInput, nullptr);
-    if (!lookup_->rows.empty()) {
-      table_->joinProbe(*lookup_);
-    }
-
-    // Update lookup_->rows to include all input rows, not just
-    // activeRows_ as we need to include all rows in the output.
-    auto& rows = lookup_->rows;
-    rows.resize(numInput);
-    std::iota(rows.begin(), rows.end(), 0);
-  } else {
-    if (lookup_->rows.empty()) {
-      input_ = nullptr;
+  if (radixPartitioner_ != nullptr) {
+    radixPartitioner_->addInput(std::move(input_));
+    if (!maybeLoadRadixPartitionedInput()) {
       return;
     }
-    lookup_->hits.resize(lookup_->rows.back() + 1);
-    table_->joinProbe(*lookup_);
+  } else {
+    if (!hasDecoded) {
+      decodeAndDetectNonNullKeys();
+    }
+    prepareInputForProbe();
   }
-
-  resultIter_->reset(*lookup_);
 }
 
 void HashProbe::prepareOutput(vector_size_t size) {
@@ -1065,6 +1097,8 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
   }
 
   clearProjectedOutput();
+
+  maybeLoadRadixPartitionedInput();
 
   if (!input_) {
     if (hasMoreInput()) {
@@ -1736,6 +1770,12 @@ void HashProbe::ensureLoaded(column_index_t channel) {
 
 void HashProbe::noMoreInput() {
   Operator::noMoreInput();
+  if (radixPartitioner_ != nullptr) {
+    radixPartitioner_->forceCollectAll();
+    pendingRadixNoMoreInput_ = true;
+    maybeLoadRadixPartitionedInput();
+    return;
+  }
   noMoreInputInternal();
 }
 

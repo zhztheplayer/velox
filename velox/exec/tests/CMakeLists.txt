@@ -85,6 +85,7 @@ add_executable(
   PrefixSortTest.cpp
   PrintPlanWithStatsTest.cpp
   ProbeOperatorStateTest.cpp
+  RadixPartitionerTest.cpp
   TraceUtilTest.cpp
   RoundRobinPartitionFunctionTest.cpp
   RowContainerTest.cpp

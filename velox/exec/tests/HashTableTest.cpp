@@ -974,7 +974,6 @@ TEST_P(HashTableTest, buildRadixPartitionsFromHash) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
-  assertProbeRowsClusteredByRadixPartition(table.get(), batches[0], pool());
 }
 
 TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
@@ -1014,8 +1013,6 @@ TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
-  assertProbeRowsClusteredByRadixPartition(
-      table.get(), buildBatch, pool(), false);
 }
 
 TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
@@ -1052,7 +1049,6 @@ TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
-  assertProbeRowsClusteredByRadixPartition(table.get(), buildBatch, pool());
 }
 
 TEST_P(HashTableTest, listJoinResultsSize) {

@@ -21,6 +21,7 @@
 #include "velox/exec/HashTable.h"
 #include "velox/exec/Operator.h"
 #include "velox/exec/ProbeOperatorState.h"
+#include "velox/exec/RadixPartitioner.h"
 #include "velox/exec/VectorHasher.h"
 
 namespace facebook::velox::exec {
@@ -45,6 +46,9 @@ class HashProbe : public Operator {
   bool needsInput() const override {
     if (state_ == ProbeOperatorState::kFinish || noMoreInput_ ||
         noMoreSpillInput_ || input_ != nullptr) {
+      return false;
+    }
+    if (radixPartitioner_ != nullptr && radixPartitioner_->hasReadyOutput()) {
       return false;
     }
     if (table_) {
@@ -321,6 +325,10 @@ class HashProbe : public Operator {
   /// Decode join key inputs and populate 'nonNullInputRows_'.
   void decodeAndDetectNonNullKeys();
 
+  void prepareInputForProbe();
+
+  bool maybeLoadRadixPartitionedInput();
+
   // Invoked when there is no more input from either upstream task or spill
   // input. If there is remaining spilled data, then the last finished probe
   // operator is responsible for notifying the hash build operators to build the
@@ -442,6 +450,10 @@ class HashProbe : public Operator {
   // Current working hash table that is shared between other HashProbes in other
   // Drivers of the same pipeline.
   std::shared_ptr<BaseHashTable> table_;
+
+  std::unique_ptr<RadixPartitioner> radixPartitioner_;
+
+  bool pendingRadixNoMoreInput_{false};
 
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};
