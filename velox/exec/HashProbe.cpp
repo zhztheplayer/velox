@@ -472,13 +472,28 @@ void HashProbe::asyncWaitForHashTable() {
             queryConfig.radixJoinMinOutputBatchRows() == 0
                 ? outputBatchSize_
                 : queryConfig.radixJoinMinOutputBatchRows());
+    radixNumMaxBufferedRows_ = std::max<vector_size_t>(1, numMaxBufferedRows);
+    radixMinOutputBatchSize_ = minOutputBatchSize;
     radixPartitioner_ = RadixPartitioner::createBuffered(
         *table_,
-        std::max<vector_size_t>(1, numMaxBufferedRows),
+        radixNumMaxBufferedRows_,
         minOutputBatchSize,
         pool());
   } else {
+    radixNumMaxBufferedRows_ = 0;
+    radixMinOutputBatchSize_ = 0;
     radixPartitioner_.reset();
+  }
+  addRuntimeStat(
+      std::string(HashProbe::kRadixPartitionerEnabled),
+      RuntimeCounter(radixPartitioner_ != nullptr));
+  if (radixPartitioner_ != nullptr) {
+    addRuntimeStat(
+        std::string(HashProbe::kRadixMaxBufferedRowsPerPartition),
+        RuntimeCounter(radixNumMaxBufferedRows_));
+    addRuntimeStat(
+        std::string(HashProbe::kRadixMinOutputBatchRows),
+        RuntimeCounter(radixMinOutputBatchSize_));
   }
 
   maybeSetupSpillInputReader(hashBuildResult->restoredPartitionId);
@@ -719,8 +734,15 @@ bool HashProbe::maybeLoadRadixPartitionedInput() {
     return input_ != nullptr;
   }
 
-  input_ = radixPartitioner_->getOutput();
+  CpuWallTiming radixTiming;
+  {
+    CpuWallTimer cpuWallTimer{radixTiming};
+    input_ = radixPartitioner_->getOutput();
+  }
+  radixPrepareInputWallNanos_ += radixTiming.wallNanos;
   if (input_ != nullptr) {
+    radixOutputRows_ += input_->size();
+    ++radixOutputBatches_;
     decodeAndDetectNonNullKeys();
     prepareInputForProbe();
     return input_ != nullptr;
@@ -823,7 +845,13 @@ void HashProbe::addInput(RowVectorPtr input) {
   }
 
   if (radixPartitioner_ != nullptr) {
-    radixPartitioner_->addInput(std::move(input_));
+    CpuWallTiming radixTiming;
+    {
+      CpuWallTimer cpuWallTimer{radixTiming};
+      radixPartitioner_->addInput(std::move(input_));
+    }
+    radixPrepareInputWallNanos_ += radixTiming.wallNanos;
+    radixInputRows_ += numInput;
     if (!maybeLoadRadixPartitionedInput()) {
       return;
     }
@@ -1862,6 +1890,27 @@ void HashProbe::noMoreInputInternal() {
   }
 }
 
+void HashProbe::addRadixRuntimeStats() {
+  if (radixRuntimeStatsReported_ || radixPartitioner_ == nullptr) {
+    return;
+  }
+  radixRuntimeStatsReported_ = true;
+  addRuntimeStat(
+      std::string(HashProbe::kRadixPrepareInputWallNanos),
+      RuntimeCounter(
+          radixPrepareInputWallNanos_,
+          RuntimeCounter::Unit::kNanos));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixInputRows),
+      RuntimeCounter(radixInputRows_));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixOutputRows),
+      RuntimeCounter(radixOutputRows_));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixOutputBatches),
+      RuntimeCounter(radixOutputBatches_));
+}
+
 bool HashProbe::isFinished() {
   return state_ == ProbeOperatorState::kFinish;
 }
@@ -2189,6 +2238,8 @@ void HashProbe::checkMaxSpillLevel(
 
 void HashProbe::close() {
   Operator::close();
+
+  addRadixRuntimeStats();
 
   // Free up major memory usage.
   joinBridge_.reset();

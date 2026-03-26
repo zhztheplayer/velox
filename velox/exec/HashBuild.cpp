@@ -895,7 +895,16 @@ bool HashBuild::finishHashBuild() {
   const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
   const auto radixPartitionBits = queryConfig.radixJoinBits();
   const auto estimatedTableBytes =
-      table_->estimateHashTableSize(table_->numDistinct());
+      table_->estimateHashTableSize(table_->numDistinct()) +
+      table_->rows()->allocatedBytes();
+  const bool radixDisabledByMinTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes < queryConfig.radixJoinMinTableBytes();
+  const bool radixDisabledByMaxTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
+  bool radixEnabled{false};
+  CpuWallTiming radixTiming;
   if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild &&
       radixPartitionBits > 0 &&
       estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
@@ -913,10 +922,32 @@ bool HashBuild::finishHashBuild() {
     if (table_->canBuildRadixPartitions(radixPartitionBits)) {
       TestValue::adjust(
           "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
-      table_->buildRadixPartitions(radixPartitionBits);
+      {
+        CpuWallTimer cpuWallTimer{radixTiming};
+        table_->buildRadixPartitions(radixPartitionBits);
+      }
+      radixEnabled = true;
       TestValue::adjust(
           "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
     }
+  }
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixBits), RuntimeCounter(radixPartitionBits));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEstimatedTableBytes),
+      RuntimeCounter(estimatedTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMinTableBytes),
+      RuntimeCounter(radixDisabledByMinTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMaxTableBytes),
+      RuntimeCounter(radixDisabledByMaxTableBytes));
+  if (radixEnabled) {
+    stats_.wlock()->addRuntimeStat(
+        std::string(HashBuild::kRadixBuildWallNanos),
+        RuntimeCounter(radixTiming.wallNanos, RuntimeCounter::Unit::kNanos));
   }
   stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kBuildWallNanos),
