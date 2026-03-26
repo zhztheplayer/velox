@@ -30,22 +30,10 @@ RowVectorPtr copyBatches(
     const std::vector<RowVectorPtr>& inputs,
     vector_size_t size) {
   VELOX_CHECK(!inputs.empty());
-  auto result = std::dynamic_pointer_cast<RowVector>(
-      BaseVector::create<RowVector>(inputs.front()->type(), 0, pool));
+  auto result = facebook::velox::RowVector::createEmpty(inputs.front()->type(), pool);
   result->resize(size);
-
-  vector_size_t targetOffset = 0;
-  std::vector<BaseVector::CopyRange> ranges;
   for (const auto& input : inputs) {
-    ranges.resize(input->size());
-    for (auto i = 0; i < input->size(); ++i) {
-      ranges[i] = BaseVector::CopyRange{i, targetOffset + i, 1};
-    }
-    result->copyRanges(
-        input.get(),
-        folly::Range<const BaseVector::CopyRange*>(
-            ranges.data(), ranges.data() + ranges.size()));
-    targetOffset += input->size();
+    result->append(input.get());
   }
   result->updateContainsLazyNotLoaded();
   return result;
