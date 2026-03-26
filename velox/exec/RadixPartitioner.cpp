@@ -92,18 +92,16 @@ class RadixPartitionerBase : public RadixPartitioner {
     }
 
     const auto partition = readyPartitions_.front();
-    readyPartitions_.pop_front();
-    partitionReady_[partition] = false;
 
     auto& queue = partitionQueues_[partition];
     VELOX_CHECK(!queue.empty());
     auto output = std::move(queue.front());
     queue.pop_front();
     bufferedRowsPerPartition_[partition] -= output->size();
-    if (!queue.empty() &&
-        (bufferedRowsPerPartition_[partition] >= numAccumulatedRows_ ||
-         noMoreInput_)) {
-      markReady(partition);
+    if (queue.empty()) {
+      VELOX_CHECK(bufferedRowsPerPartition_[partition] == 0);
+      readyPartitions_.pop_front();
+      partitionReady_[partition] = false;
     }
     common::testutil::TestValue::adjust(
         "facebook::velox::exec::RadixPartitioner::collect", this);
