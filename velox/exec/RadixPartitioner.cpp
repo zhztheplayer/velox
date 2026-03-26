@@ -53,11 +53,6 @@ RowVectorPtr copyBatches(
 
 class BufferedRadixPartitioner final : public RadixPartitioner {
  public:
-  struct PartitionState {
-    vector_size_t bufferedRows{0};
-    std::deque<RowVectorPtr> queue;
-  };
-
   BufferedRadixPartitioner(
       BaseHashTable& table,
       vector_size_t numMaxBufferedRows,
@@ -68,7 +63,9 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
         minOutputBatchSize_(minOutputBatchSize),
         pool_(pool),
         lookup_(std::make_unique<HashLookup>(table.hashers(), pool)),
-        partitions_(1u << table.radixPartitionBits()) {
+        bufferedRowsPerPartition_(1u << table.radixPartitionBits(), 0),
+        partitionQueues_(1u << table.radixPartitionBits()),
+        partitionReady_(1u << table.radixPartitionBits(), false) {
     VELOX_CHECK_GT(numMaxBufferedRows_, 0);
     VELOX_CHECK_GT(minOutputBatchSize_, 0);
     VELOX_CHECK(table_.isRadixPartitioned());
@@ -86,27 +83,22 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       if (rows.empty()) {
         continue;
       }
-      enqueuePartitionVector(makePartitionVector(input, rows), partition);
+      partitionQueues_[partition].push_back(makePartitionVector(input, rows));
+      bufferedRowsPerPartition_[partition] += rows.size();
+      if (bufferedRowsPerPartition_[partition] >= numMaxBufferedRows_) {
+        markReady(partition);
+      }
     }
   }
 
   RowVectorPtr getOutput() override {
-    if (!hasReadyOutput()) {
+    if (readyPartitions_.empty()) {
       return nullptr;
     }
 
-    if (currentDrainingPartition_ < 0) {
-      int32_t largestPartition = findLargestPartition();
-      auto& largestPartitionState = partitions_[largestPartition];
-      VELOX_CHECK_GT(largestPartitionState.bufferedRows, 0);
-      currentDrainingPartition_ = largestPartition;
-    }
-    auto& [bufferedRows, queue] = partitions_[currentDrainingPartition_];
-
-    if (bufferedRows == 0) {
-      VELOX_CHECK(queue.empty());
-      return nullptr;
-    }
+    const auto partition = readyPartitions_.front();
+    auto& queue = partitionQueues_[partition];
+    VELOX_CHECK(!queue.empty());
     std::vector<RowVectorPtr> outputs;
     vector_size_t outputSize = 0;
     while (!queue.empty() && outputSize < minOutputBatchSize_) {
@@ -117,11 +109,11 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
     auto output =
         outputs.size() == 1 ? std::move(outputs.front())
                             : copyBatches(pool_, outputs, outputSize);
-    bufferedRows -= outputSize;
-    totalBufferedRows_ -= outputSize;
+    bufferedRowsPerPartition_[partition] -= outputSize;
     if (queue.empty()) {
-      VELOX_CHECK_EQ(bufferedRows, 0);
-      currentDrainingPartition_ = -1;
+      VELOX_CHECK_EQ(bufferedRowsPerPartition_[partition], 0);
+      readyPartitions_.pop_front();
+      partitionReady_[partition] = false;
     }
     common::testutil::TestValue::adjust(
         "facebook::velox::exec::RadixPartitioner::collect", this);
@@ -130,23 +122,22 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
 
   void noMoreInput() override {
     noMoreInput_ = true;
+    for (auto partition = 0; partition < numPartitions(); ++partition) {
+      if (!partitionQueues_[partition].empty()) {
+        markReady(partition);
+      }
+    }
   }
 
   bool hasReadyOutput() const override {
-    if (noMoreInput_) {
-      return totalBufferedRows_ > 0;
-    }
-    if (currentDrainingPartition_ >= 0) {
-      return true;
-    }
-    if (totalBufferedRows_ >= numMaxBufferedRows_) {
-      return true;
-    }
-    return false;
+    return !readyPartitions_.empty();
   }
 
   bool hasBufferedData() const override {
-    return totalBufferedRows_ > 0;
+    return std::any_of(
+        bufferedRowsPerPartition_.begin(),
+        bufferedRowsPerPartition_.end(),
+        [](auto rows) { return rows > 0; });
   }
 
  private:
@@ -160,15 +151,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   }
 
   int32_t numPartitions() const {
-    return static_cast<int32_t>(partitions_.size());
-  }
-
-  void enqueuePartitionVector(RowVectorPtr output, int32_t partition) {
-    VELOX_CHECK_NOT_NULL(output);
-    auto& partitionState = partitions_[partition];
-    partitionState.queue.push_back(std::move(output));
-    partitionState.bufferedRows += partitionState.queue.back()->size();
-    totalBufferedRows_ += partitionState.queue.back()->size();
+    return static_cast<int32_t>(bufferedRowsPerPartition_.size());
   }
 
  private:
@@ -213,17 +196,12 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
     return partitionRows;
   }
 
-  int32_t findLargestPartition() const {
-    int32_t largestPartition = 0;
-    vector_size_t largestBufferedRows = 0;
-    for (auto partition = 0; partition < numPartitions(); ++partition) {
-      const auto bufferedRows = partitions_[partition].bufferedRows;
-      if (bufferedRows > largestBufferedRows) {
-        largestPartition = partition;
-        largestBufferedRows = bufferedRows;
-      }
+  void markReady(int32_t partition) {
+    if (partitionReady_[partition]) {
+      return;
     }
-    return largestPartition;
+    partitionReady_[partition] = true;
+    readyPartitions_.push_back(partition);
   }
 
  private:
@@ -232,11 +210,11 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   const vector_size_t minOutputBatchSize_;
   memory::MemoryPool* const pool_;
   std::unique_ptr<HashLookup> lookup_;
-
-  std::vector<PartitionState> partitions_;
-  vector_size_t totalBufferedRows_{0};
+  std::vector<vector_size_t> bufferedRowsPerPartition_;
+  std::vector<std::deque<RowVectorPtr>> partitionQueues_;
+  std::vector<bool> partitionReady_;
+  std::deque<int32_t> readyPartitions_;
   bool noMoreInput_{false};
-  int32_t currentDrainingPartition_{-1};
 };
 
 } // namespace
