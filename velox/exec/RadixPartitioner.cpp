@@ -51,14 +51,14 @@ RowVectorPtr copyBatches(
   return result;
 }
 
-class RadixPartitionerBase : public RadixPartitioner {
+class BufferedRadixPartitioner final : public RadixPartitioner {
  public:
   struct PartitionState {
     vector_size_t bufferedRows{0};
     std::deque<RowVectorPtr> queue;
   };
 
-  RadixPartitionerBase(
+  BufferedRadixPartitioner(
       BaseHashTable& table,
       vector_size_t numMaxBufferedRows,
       vector_size_t minOutputBatchSize,
@@ -86,7 +86,7 @@ class RadixPartitionerBase : public RadixPartitioner {
       if (rows.empty()) {
         continue;
       }
-      enqueuePartitionVector(makePartitionVector(input, partition, rows), partition);
+      enqueuePartitionVector(makePartitionVector(input, rows), partition);
     }
   }
 
@@ -149,11 +149,15 @@ class RadixPartitionerBase : public RadixPartitioner {
     return totalBufferedRows_ > 0;
   }
 
- protected:
-  virtual RowVectorPtr makePartitionVector(
+ private:
+  RowVectorPtr makePartitionVector(
       const RowVectorPtr& input,
-      int32_t partition,
-      const std::vector<vector_size_t>& rows) = 0;
+      const std::vector<vector_size_t>& rows) {
+    auto indices = allocateIndices(rows.size(), pool_);
+    auto* rawIndices = indices->asMutable<vector_size_t>();
+    std::copy(rows.begin(), rows.end(), rawIndices);
+    return wrapChildren(pool_, input, indices, rows.size());
+  }
 
   int32_t numPartitions() const {
     return static_cast<int32_t>(partitions_.size());
@@ -222,44 +226,27 @@ class RadixPartitionerBase : public RadixPartitioner {
     return largestPartition;
   }
 
-protected:
+ private:
   BaseHashTable& table_;
   const vector_size_t numMaxBufferedRows_;
   const vector_size_t minOutputBatchSize_;
   memory::MemoryPool* const pool_;
   std::unique_ptr<HashLookup> lookup_;
 
- private:
   std::vector<PartitionState> partitions_;
   vector_size_t totalBufferedRows_{0};
   bool noMoreInput_{false};
   int32_t currentDrainingPartition_{-1};
 };
 
-class WrappedRadixPartitioner final : public RadixPartitionerBase {
- public:
-  using RadixPartitionerBase::RadixPartitionerBase;
-
- private:
-  RowVectorPtr makePartitionVector(
-      const RowVectorPtr& input,
-      int32_t /*partition*/,
-      const std::vector<vector_size_t>& rows) override {
-    auto indices = allocateIndices(rows.size(), pool_);
-    auto* rawIndices = indices->asMutable<vector_size_t>();
-    std::copy(rows.begin(), rows.end(), rawIndices);
-    return wrapChildren(pool_, input, indices, rows.size());
-  }
-};
-
 } // namespace
 
-std::unique_ptr<RadixPartitioner> RadixPartitioner::createWrapped(
+std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
     BaseHashTable& table,
     vector_size_t numMaxBufferedRows,
     vector_size_t minOutputBatchSize,
     memory::MemoryPool* pool) {
-  return std::make_unique<WrappedRadixPartitioner>(
+  return std::make_unique<BufferedRadixPartitioner>(
       table, numMaxBufferedRows, minOutputBatchSize, pool);
 }
 

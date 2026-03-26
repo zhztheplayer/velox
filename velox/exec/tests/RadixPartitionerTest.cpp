@@ -100,7 +100,7 @@ class RadixPartitionerTest : public testing::Test,
 
 TEST_F(RadixPartitionerTest, wrapped) {
   auto table = makeRadixTable();
-  auto partitioner = RadixPartitioner::createWrapped(*table, 1, 1, pool());
+  auto partitioner = RadixPartitioner::createBuffered(*table, 1, 1, pool());
 
   auto first = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(128, [](auto row) {
@@ -118,7 +118,8 @@ TEST_F(RadixPartitionerTest, wrapped) {
 
 TEST_F(RadixPartitionerTest, wrappedMinBatchSize) {
   auto table = makeRadixTable();
-  auto partitioner = RadixPartitioner::createWrapped(*table, 1, 100, pool());
+  auto partitioner =
+      RadixPartitioner::createBuffered(*table, 1, 100, pool());
 
   auto input = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(64, [](auto row) {

@@ -12,7 +12,7 @@ class RadixPartitioner {
  public:
   virtual ~RadixPartitioner() = default;
 
-  static std::unique_ptr<RadixPartitioner> createWrapped(
+  static std::unique_ptr<RadixPartitioner> createBuffered(
       BaseHashTable& table,
       vector_size_t numMaxBufferedRows,
       vector_size_t minOutputBatchSize,

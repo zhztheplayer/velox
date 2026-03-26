@@ -455,7 +455,7 @@ void HashProbe::asyncWaitForHashTable() {
 
   if (table_->isRadixPartitioned() && !canSpill()) {
     // Keep radix-partitioned probe buffering on the simple in-memory path.
-    radixPartitioner_ = RadixPartitioner::createWrapped(
+    radixPartitioner_ = RadixPartitioner::createBuffered(
         *table_, kRadixProbeNumAccumulatedRows, outputBatchSize_, pool());
   } else {
     radixPartitioner_.reset();
