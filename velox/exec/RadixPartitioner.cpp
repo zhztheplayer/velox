@@ -59,7 +59,8 @@ class RadixPartitionerBase : public RadixPartitioner {
         bufferedRowsPerPartition_(
             1u << table.radixPartitionBits(),
             0),
-        partitionQueues_(1u << table.radixPartitionBits()) {
+        partitionQueues_(1u << table.radixPartitionBits()),
+        partitionReady_(1u << table.radixPartitionBits(), false) {
     VELOX_CHECK_GT(numAccumulatedRows_, 0);
     VELOX_CHECK(table_.isRadixPartitioned());
   }
@@ -79,40 +80,47 @@ class RadixPartitionerBase : public RadixPartitioner {
       partitionQueues_[partition].push_back(
           makePartitionVector(input, partition, rows));
       bufferedRowsPerPartition_[partition] += rows.size();
+      if (bufferedRowsPerPartition_[partition] >= numAccumulatedRows_) {
+        markReady(partition);
+      }
     }
   }
 
   RowVectorPtr collect() override {
-    const auto numPartitions = this->numPartitions();
-    for (auto i = 0; i < numPartitions; ++i) {
-      const auto partition = (nextCollectPartition_ + i) % numPartitions;
-      if (!isReady(partition)) {
-        continue;
-      }
-      auto& queue = partitionQueues_[partition];
-      VELOX_CHECK(!queue.empty());
-      auto output = std::move(queue.front());
-      queue.pop_front();
-      bufferedRowsPerPartition_[partition] -= output->size();
-      nextCollectPartition_ = (partition + 1) % numPartitions;
-      common::testutil::TestValue::adjust(
-          "facebook::velox::exec::RadixPartitioner::collect", this);
-      return output;
+    if (readyPartitions_.empty()) {
+      return nullptr;
     }
-    return nullptr;
+
+    const auto partition = readyPartitions_.front();
+    readyPartitions_.pop_front();
+    partitionReady_[partition] = false;
+
+    auto& queue = partitionQueues_[partition];
+    VELOX_CHECK(!queue.empty());
+    auto output = std::move(queue.front());
+    queue.pop_front();
+    bufferedRowsPerPartition_[partition] -= output->size();
+    if (!queue.empty() &&
+        (forceCollectAll_ ||
+         bufferedRowsPerPartition_[partition] >= numAccumulatedRows_)) {
+      markReady(partition);
+    }
+    common::testutil::TestValue::adjust(
+        "facebook::velox::exec::RadixPartitioner::collect", this);
+    return output;
   }
 
   void forceCollectAll() override {
     forceCollectAll_ = true;
+    for (auto partition = 0; partition < numPartitions(); ++partition) {
+      if (!partitionQueues_[partition].empty()) {
+        markReady(partition);
+      }
+    }
   }
 
   bool hasReadyOutput() const override {
-    for (auto partition = 0; partition < numPartitions(); ++partition) {
-      if (isReady(partition)) {
-        return true;
-      }
-    }
-    return false;
+    return !readyPartitions_.empty();
   }
 
   bool hasBufferedData() const override {
@@ -174,12 +182,12 @@ class RadixPartitionerBase : public RadixPartitioner {
     return partitionRows;
   }
 
-  bool isReady(int32_t partition) const {
-    if (partitionQueues_[partition].empty()) {
-      return false;
+  void markReady(int32_t partition) {
+    if (partitionReady_[partition]) {
+      return;
     }
-    return forceCollectAll_ ||
-        bufferedRowsPerPartition_[partition] >= numAccumulatedRows_;
+    partitionReady_[partition] = true;
+    readyPartitions_.push_back(partition);
   }
 
  protected:
@@ -191,7 +199,8 @@ class RadixPartitionerBase : public RadixPartitioner {
  private:
   std::vector<vector_size_t> bufferedRowsPerPartition_;
   std::vector<std::deque<RowVectorPtr>> partitionQueues_;
-  int32_t nextCollectPartition_{0};
+  std::vector<bool> partitionReady_;
+  std::deque<int32_t> readyPartitions_;
   bool forceCollectAll_{false};
 };
 
