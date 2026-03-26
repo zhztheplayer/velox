@@ -892,8 +892,14 @@ bool HashBuild::finishHashBuild() {
   }
   // The first radix-build iteration only supports the simple in-memory
   // single-table case. Spilled input and merged peer tables are excluded.
-  constexpr uint8_t kRadixPartitionBits = 4;
-  if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild) {
+  const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+  const auto radixPartitionBits = queryConfig.radixJoinBits();
+  const auto estimatedTableBytes =
+      table_->estimateHashTableSize(table_->numDistinct());
+  if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild &&
+      radixPartitionBits > 0 &&
+      estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
+      estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
     // Array mode has no bucket-addressed layout, so normalize it to generic
     // hash mode before attempting the radix rebuild. Hash and normalized-key
     // modes are allowed to proceed directly.
@@ -904,10 +910,10 @@ bool HashBuild::finishHashBuild() {
       table_->forceGenericHashMode(
           BaseHashTable::kNoSpillInputStartPartitionBit);
     }
-    if (table_->canBuildRadixPartitions(kRadixPartitionBits)) {
+    if (table_->canBuildRadixPartitions(radixPartitionBits)) {
       TestValue::adjust(
           "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
-      table_->buildRadixPartitions(kRadixPartitionBits);
+      table_->buildRadixPartitions(radixPartitionBits);
       TestValue::adjust(
           "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
     }

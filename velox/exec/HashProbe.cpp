@@ -32,7 +32,6 @@ namespace {
 
 // Batch size used when iterating the row container.
 constexpr int kBatchSize = 1024;
-constexpr vector_size_t kRadixProbeNumAccumulatedRows = 1'000'000;
 } // namespace
 
 // static
@@ -455,8 +454,29 @@ void HashProbe::asyncWaitForHashTable() {
 
   if (table_->isRadixPartitioned() && !canSpill()) {
     // Keep radix-partitioned probe buffering on the simple in-memory path.
+    const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+    const auto buildRows = static_cast<vector_size_t>(table_->rows()->numRows());
+    const auto numRadixPartitions =
+        vector_size_t{1} << table_->radixPartitionBits();
+    const auto bufferedRowsFromFactor =
+        std::max<vector_size_t>(
+            1,
+            static_cast<vector_size_t>(queryConfig.radixJoinBufferFactor()) *
+                buildRows / numRadixPartitions);
+    const auto numMaxBufferedRows = std::min(
+        queryConfig.radixJoinMaxBufferedRowsPerPartition(),
+        bufferedRowsFromFactor);
+    const auto minOutputBatchSize =
+        std::max<vector_size_t>(
+            1,
+            queryConfig.radixJoinMinOutputBatchRows() == 0
+                ? outputBatchSize_
+                : queryConfig.radixJoinMinOutputBatchRows());
     radixPartitioner_ = RadixPartitioner::createBuffered(
-        *table_, kRadixProbeNumAccumulatedRows, outputBatchSize_, pool());
+        *table_,
+        std::max<vector_size_t>(1, numMaxBufferedRows),
+        minOutputBatchSize,
+        pool());
   } else {
     radixPartitioner_.reset();
   }
