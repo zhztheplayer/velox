@@ -25,6 +25,7 @@
 #include <fmt/format.h>
 
 #include "velox/common/base/SelectivityInfo.h"
+#include "velox/exec/RadixPartitioner.h"
 #include "velox/exec/HashTable.h"
 #include "velox/vector/tests/utils/VectorMaker.h"
 
@@ -50,6 +51,39 @@ using namespace facebook::velox::exec;
 using namespace facebook::velox::test;
 
 namespace {
+
+class EagerPassThroughRadixPartitioner final : public RadixPartitioner {
+ public:
+  void addInput(RowVectorPtr input) override {
+    VELOX_CHECK_NOT_NULL(input);
+    if (input->size() == 0) {
+      return;
+    }
+    queue_.push_back(std::move(input));
+  }
+
+  RowVectorPtr collect() override {
+    if (queue_.empty()) {
+      return nullptr;
+    }
+    auto output = std::move(queue_.front());
+    queue_.pop_front();
+    return output;
+  }
+
+  void forceCollectAll() override {}
+
+  bool hasReadyOutput() const override {
+    return !queue_.empty();
+  }
+
+  bool hasBufferedData() const override {
+    return !queue_.empty();
+  }
+
+ private:
+  std::deque<RowVectorPtr> queue_;
+};
 
 struct FixedProbeParams {
   std::string title;
@@ -121,6 +155,7 @@ class FixedProbeBenchmark {
   void makeData(const FixedProbeParams& params) {
     params_ = params;
     table_.reset();
+    probePartitioner_.reset();
     buildRows_.clear();
     expectedHits_.clear();
 
@@ -156,6 +191,10 @@ class FixedProbeBenchmark {
         nullptr);
     if (radixEnabled) {
       table_->buildRadixPartitions(params_.numRadixBits);
+      auto numAccumulatedRows = params_.buildSize / (1ULL << params_.numRadixBits) * 10;
+      probePartitioner_ = RadixPartitioner::createCopied(*table_, numAccumulatedRows, pool_.get());
+    } else {
+      probePartitioner_ = std::make_unique<EagerPassThroughRadixPartitioner>();
     }
     buildExpectedHits();
   }
@@ -176,25 +215,33 @@ class FixedProbeBenchmark {
       const auto batchSize =
           std::min<int64_t>(probeKeys_->size(), params_.probeSize - offset);
       fillProbeBatch(offset, batchSize);
+      probePartitioner_->addInput(probe_);
 
-      SelectivityVector rows(batchSize);
+      while (auto partitionedInput = probePartitioner_->collect()) {
+        const auto inputSize = partitionedInput->size();
+        SelectivityVector rows(inputSize);
 
-      {
-        SelectivityTimer timer(hashTime, 0);
-        table_->prepareForJoinProbe(*lookup, probe_, rows, true);
-      }
-      numHashed += batchSize;
+        {
+          SelectivityTimer timer(hashTime, 0);
+          table_->prepareForJoinProbe(*lookup, partitionedInput, rows, true);
+        }
+        numHashed += inputSize;
 
-      {
-        SelectivityTimer timer(probeTime, 0);
-        table_->joinProbe(*lookup);
-      }
-      numProbed += batchSize;
+        {
+          SelectivityTimer timer(probeTime, 0);
+          table_->joinProbe(*lookup);
+        }
+        numProbed += inputSize;
 
-      for (auto row = 0; row < batchSize; ++row) {
-        numHit += lookup->hits[row] != nullptr;
-        VELOX_CHECK_EQ(
-            expectedHits_[(offset + row) % params_.buildSize], lookup->hits[row]);
+        DecodedVector decodedKeys;
+        decodedKeys.decode(*partitionedInput->childAt(0), rows);
+        for (auto row = 0; row < inputSize; ++row) {
+          const auto key = decodedKeys.valueAt<int64_t>(row);
+          numHit += lookup->hits[row] != nullptr;
+          VELOX_CHECK_GE(key, 0);
+          VELOX_CHECK_LT(key, params_.buildSize);
+          VELOX_CHECK_EQ(expectedHits_[key], lookup->hits[row]);
+        }
       }
     }
     VELOX_CHECK_EQ(numHit, params_.probeSize);
@@ -284,6 +331,7 @@ class FixedProbeBenchmark {
   std::vector<char*> buildRows_;
   std::vector<char*> expectedHits_;
   std::unique_ptr<HashTable<true>> table_;
+  std::unique_ptr<RadixPartitioner> probePartitioner_;
   FixedProbeParams params_{"default", 1, 2, 0};
 };
 
