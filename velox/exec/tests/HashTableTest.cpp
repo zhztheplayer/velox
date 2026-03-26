@@ -925,8 +925,6 @@ void assertProbeRowsClusteredByRadixPartition(
 
   std::vector<vector_size_t> partitionCounts(4, 0);
   vector_size_t totalRows = 0;
-  uint32_t previousPartition = 0;
-  bool sawAnyOutput = false;
   while (auto output = partitioner->getOutput()) {
     HashLookup lookup(table->hashers(), pool);
     SelectivityVector rows(output->size());
@@ -935,18 +933,12 @@ void assertProbeRowsClusteredByRadixPartition(
     ASSERT_FALSE(lookup.rows.empty());
     const auto partition =
         concreteTable->getRadixPartition(lookup.hashes[lookup.rows[0]]);
-    if (sawAnyOutput) {
-      ASSERT_LE(previousPartition, partition);
-    }
-    previousPartition = partition;
     ++partitionCounts[partition];
-    sawAnyOutput = true;
     totalRows += output->size();
     for (auto row : lookup.rows) {
       ASSERT_EQ(partition, concreteTable->getRadixPartition(lookup.hashes[row]));
     }
   }
-  ASSERT_TRUE(sawAnyOutput);
   ASSERT_EQ(totalRows, probeBatch->size());
   if (requireAllPartitionsNonEmpty) {
     for (auto count : partitionCounts) {

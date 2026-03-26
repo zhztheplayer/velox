@@ -48,20 +48,21 @@ RowVectorPtr copyRows(
 
 class RadixPartitionerBase : public RadixPartitioner {
  public:
+  struct PartitionState {
+    vector_size_t bufferedRows{0};
+    std::deque<RowVectorPtr> queue;
+  };
+
   RadixPartitionerBase(
       BaseHashTable& table,
-      vector_size_t numAccumulatedRows,
+      vector_size_t numMaxBufferedRows,
       memory::MemoryPool* pool)
       : table_(table),
-        numAccumulatedRows_(numAccumulatedRows),
+        numMaxBufferedRows_(numMaxBufferedRows),
         pool_(pool),
         lookup_(std::make_unique<HashLookup>(table.hashers(), pool)),
-        bufferedRowsPerPartition_(
-            1u << table.radixPartitionBits(),
-            0),
-        partitionQueues_(1u << table.radixPartitionBits()),
-        partitionReady_(1u << table.radixPartitionBits(), false) {
-    VELOX_CHECK_GT(numAccumulatedRows_, 0);
+        partitions_(1u << table.radixPartitionBits()) {
+    VELOX_CHECK_GT(numMaxBufferedRows_, 0);
     VELOX_CHECK(table_.isRadixPartitioned());
   }
 
@@ -77,31 +78,46 @@ class RadixPartitionerBase : public RadixPartitioner {
       if (rows.empty()) {
         continue;
       }
-      partitionQueues_[partition].push_back(
-          makePartitionVector(input, partition, rows));
-      bufferedRowsPerPartition_[partition] += rows.size();
-      if (bufferedRowsPerPartition_[partition] >= numAccumulatedRows_) {
-        markReady(partition);
-      }
+      auto& partitionState = partitions_[partition];
+      partitionState.queue.push_back(makePartitionVector(input, partition, rows));
+      partitionState.bufferedRows += rows.size();
+      totalBufferedRows_ += rows.size();
     }
   }
 
   RowVectorPtr getOutput() override {
-    if (readyPartitions_.empty()) {
+    if (!noMoreInput_ && totalBufferedRows_ < numMaxBufferedRows_ && currentDrainingPartition_ < 0) {
       return nullptr;
     }
 
-    const auto partition = readyPartitions_.front();
+    if (currentDrainingPartition_ < 0) {
+      int32_t largestPartition = findLargestPartition();
+      auto& largestPartitionState = partitions_[largestPartition];
+      if (largestPartitionState.bufferedRows == 0) {
+        VELOX_CHECK(totalBufferedRows_ == 0);
+        VELOX_CHECK(std::all_of(
+            partitions_.begin(),
+            partitions_.end(),
+            [](const PartitionState& partition) {
+              return partition.bufferedRows == 0 && partition.queue.empty();
+            }));
+        return nullptr;
+      }
+      currentDrainingPartition_ = largestPartition;
+    }
+    auto& [bufferedRows, queue] = partitions_[currentDrainingPartition_];
 
-    auto& queue = partitionQueues_[partition];
-    VELOX_CHECK(!queue.empty());
+    if (bufferedRows == 0) {
+      VELOX_CHECK(queue.empty());
+      return nullptr;
+    }
     auto output = std::move(queue.front());
     queue.pop_front();
-    bufferedRowsPerPartition_[partition] -= output->size();
+    bufferedRows -= output->size();
+    totalBufferedRows_ -= output->size();
     if (queue.empty()) {
-      VELOX_CHECK(bufferedRowsPerPartition_[partition] == 0);
-      readyPartitions_.pop_front();
-      partitionReady_[partition] = false;
+      VELOX_CHECK_EQ(bufferedRows, 0);
+      currentDrainingPartition_ = -1;
     }
     common::testutil::TestValue::adjust(
         "facebook::velox::exec::RadixPartitioner::collect", this);
@@ -110,23 +126,15 @@ class RadixPartitionerBase : public RadixPartitioner {
 
   void noMoreInput() override {
     noMoreInput_ = true;
-    for (auto partition = 0; partition < numPartitions(); ++partition) {
-      auto& queue = partitionQueues_[partition];
-      if (!queue.empty()) {
-        markReady(partition);
-      }
-    }
   }
 
   bool hasReadyOutput() const override {
-    return !readyPartitions_.empty();
+    return noMoreInput_ ? totalBufferedRows_ > 0
+                        : totalBufferedRows_ >= numMaxBufferedRows_;
   }
 
   bool hasBufferedData() const override {
-    return std::any_of(
-        bufferedRowsPerPartition_.begin(),
-        bufferedRowsPerPartition_.end(),
-        [](auto rows) { return rows > 0; });
+    return totalBufferedRows_ > 0;
   }
 
  protected:
@@ -136,12 +144,12 @@ class RadixPartitionerBase : public RadixPartitioner {
       const std::vector<vector_size_t>& rows) = 0;
 
   int32_t numPartitions() const {
-    return static_cast<int32_t>(bufferedRowsPerPartition_.size());
+    return static_cast<int32_t>(partitions_.size());
   }
 
  private:
   std::vector<std::vector<vector_size_t>> partitionInput(
-      const RowVectorPtr& input) {
+      const RowVectorPtr& input) const {
     SelectivityVector rows(input->size());
     auto& hashers = lookup_->hashers;
     lookup_->reset(rows.end());
@@ -181,26 +189,30 @@ class RadixPartitionerBase : public RadixPartitioner {
     return partitionRows;
   }
 
-  void markReady(int32_t partition) {
-    if (partitionReady_[partition]) {
-      return;
+  int32_t findLargestPartition() const {
+    int32_t largestPartition = 0;
+    vector_size_t largestBufferedRows = 0;
+    for (auto partition = 0; partition < numPartitions(); ++partition) {
+      const auto bufferedRows = partitions_[partition].bufferedRows;
+      if (bufferedRows > largestBufferedRows) {
+        largestPartition = partition;
+        largestBufferedRows = bufferedRows;
+      }
     }
-    partitionReady_[partition] = true;
-    readyPartitions_.push_back(partition);
+    return largestPartition;
   }
 
  protected:
   BaseHashTable& table_;
-  const vector_size_t numAccumulatedRows_;
+  const vector_size_t numMaxBufferedRows_;
   memory::MemoryPool* const pool_;
   std::unique_ptr<HashLookup> lookup_;
 
  private:
-  std::vector<vector_size_t> bufferedRowsPerPartition_;
-  std::vector<std::deque<RowVectorPtr>> partitionQueues_;
-  std::vector<bool> partitionReady_;
-  std::deque<int32_t> readyPartitions_;
+  std::vector<PartitionState> partitions_;
+  vector_size_t totalBufferedRows_{0};
   bool noMoreInput_{false};
+  int32_t currentDrainingPartition_{-1};
 };
 
 class WrappedRadixPartitioner final : public RadixPartitionerBase {
@@ -236,18 +248,18 @@ class CopiedRadixPartitioner final : public RadixPartitionerBase {
 
 std::unique_ptr<RadixPartitioner> RadixPartitioner::createWrapped(
     BaseHashTable& table,
-    vector_size_t numAccumulatedRows,
+    vector_size_t numMaxBufferedRows,
     memory::MemoryPool* pool) {
   return std::make_unique<WrappedRadixPartitioner>(
-      table, numAccumulatedRows, pool);
+      table, numMaxBufferedRows, pool);
 }
 
 std::unique_ptr<RadixPartitioner> RadixPartitioner::createCopied(
     BaseHashTable& table,
-    vector_size_t numAccumulatedRows,
+    vector_size_t numMaxBufferedRows,
     memory::MemoryPool* pool) {
   return std::make_unique<CopiedRadixPartitioner>(
-      table, numAccumulatedRows, pool);
+      table, numMaxBufferedRows, pool);
 }
 
 } // namespace facebook::velox::exec

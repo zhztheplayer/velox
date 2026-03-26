@@ -14,12 +14,12 @@ class RadixPartitioner {
 
   static std::unique_ptr<RadixPartitioner> createWrapped(
       BaseHashTable& table,
-      vector_size_t numAccumulatedRows,
+      vector_size_t numMaxBufferedRows,
       memory::MemoryPool* pool);
 
   static std::unique_ptr<RadixPartitioner> createCopied(
       BaseHashTable& table,
-      vector_size_t numAccumulatedRows,
+      vector_size_t numMaxBufferedRows,
       memory::MemoryPool* pool);
 
   virtual void addInput(RowVectorPtr input) = 0;
