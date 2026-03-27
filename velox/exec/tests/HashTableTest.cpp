@@ -886,8 +886,6 @@ void assertRowsClusteredByRadixPartition(
     HashTableTestHelper<true>& testHelper,
     BaseHashTable* table,
     memory::MemoryPool* pool) {
-  auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
-  ASSERT_NE(concreteTable, nullptr);
   constexpr auto kHashBatchSize = 1024;
   raw_vector<char*> buildRows(pool);
   buildRows.resize(table->rows()->numRows());
@@ -910,7 +908,7 @@ void assertRowsClusteredByRadixPartition(
 
   uint32_t previousPartition = 0;
   for (auto i = 0; i < numRows; ++i) {
-    const auto partition = concreteTable->getRadixPartition(hashes[i]);
+    const auto partition = table->getRadixPartition(hashes[i]);
     if (i > 0) {
       ASSERT_LE(previousPartition, partition);
     }
@@ -923,8 +921,6 @@ void assertProbeRowsClusteredByRadixPartition(
     const RowVectorPtr& probeBatch,
     memory::MemoryPool* pool,
     bool requireAllPartitionsNonEmpty = true) {
-  auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
-  ASSERT_NE(concreteTable, nullptr);
   auto partitioner = RadixPartitioner::createBuffered(*table, 1, 1, pool);
   partitioner->addInput(probeBatch);
   partitioner->noMoreInput();
@@ -938,11 +934,12 @@ void assertProbeRowsClusteredByRadixPartition(
 
     ASSERT_FALSE(lookup.rows.empty());
     const auto partition =
-        concreteTable->getRadixPartition(lookup.hashes[lookup.rows[0]]);
+        table->getRadixPartition(lookup.hashes[lookup.rows[0]]);
     ++partitionCounts[partition];
     totalRows += output->size();
+    // Asserts all rows in the output batch belong to the same partition.
     for (auto row : lookup.rows) {
-      ASSERT_EQ(partition, concreteTable->getRadixPartition(lookup.hashes[row]));
+      ASSERT_EQ(partition, table->getRadixPartition(lookup.hashes[row]));
     }
   }
   ASSERT_EQ(totalRows, probeBatch->size());
