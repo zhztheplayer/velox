@@ -276,6 +276,12 @@ void HashProbe::maybeSetupInputSpiller(
   if (noMoreSpillInput_) {
     inputSpiller_->finishSpill(inputSpillPartitionSet_);
   }
+
+  if (radixPartitioner_ != nullptr) {
+    radixPartitioner_->noMoreInput();
+  }
+  TestValue::adjust(
+      "facebook::velox::exec::HashProbe::afterSetupInputSpiller", this);
 }
 
 void HashProbe::maybeSetupSpillInputReader(
@@ -462,8 +468,11 @@ void HashProbe::asyncWaitForHashTable() {
 
   VELOX_CHECK_NOT_NULL(table_);
 
-  if (table_->isRadixPartitioned() && !canSpill()) {
-    // Keep radix-partitioned probe buffering on the simple in-memory path.
+  const bool spillActive = hashBuildResult->restoredPartitionId.has_value() ||
+      !hashBuildResult->spillPartitionIds.empty();
+  if (table_->isRadixPartitioned() && !spillActive) {
+    // Keep radix-partitioned probe buffering while the current build round
+    // has not entered spill or restore processing.
     const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
     const auto buildRows = static_cast<vector_size_t>(table_->rows()->numRows());
     const auto numRadixPartitions =
@@ -486,10 +495,11 @@ void HashProbe::asyncWaitForHashTable() {
     radixNumMaxBufferedRows_ = std::max<vector_size_t>(1, numMaxBufferedRows);
     radixMinOutputBatchSize_ = minOutputBatchSize;
     radixPartitioner_ = RadixPartitioner::createBuffered(
-        *table_,
+        table_,
         radixNumMaxBufferedRows_,
         minOutputBatchSize,
         pool());
+    radixPartitionerEverEnabled_ = true;
   } else {
     radixNumMaxBufferedRows_ = 0;
     radixMinOutputBatchSize_ = 0;
@@ -756,16 +766,21 @@ void HashProbe::maybeLoadRadixPartitionedInput() {
   if (input_ == nullptr) {
     if (noMoreInput_) {
       noMoreInputInternal();
+      radixPartitioner_.reset();
+    } else if (spillActive()) {
+      radixPartitioner_.reset();
     }
     return;
   }
   radixOutputRows_ += input_->size();
   ++radixOutputBatches_;
+  TestValue::adjust(
+      "facebook::velox::exec::HashProbe::beforeProbeRadixBatch", this);
   addInputInternal(std::move(input_));
 }
 
 void HashProbe::addInput(RowVectorPtr input) {
-  if (radixPartitioner_ != nullptr) {
+  if (radixPartitioner_ != nullptr && !spillActive()) {
     const auto numInput = input->size();
     CpuWallTiming radixTiming;
     {
@@ -1105,6 +1120,11 @@ bool HashProbe::needToSpillInput() const {
   VELOX_CHECK_EQ(spillInputPartitionIds_.empty(), inputSpiller_ == nullptr);
 
   return !spillInputPartitionIds_.empty();
+}
+
+bool HashProbe::spillActive() const {
+  return spillInputReader_ != nullptr || restoringPartitionId_.has_value() ||
+      inputSpiller_ != nullptr || !spillInputPartitionIds_.empty();
 }
 
 void HashProbe::setState(ProbeOperatorState state) {
@@ -1928,7 +1948,7 @@ void HashProbe::noMoreInputInternal() {
 }
 
 void HashProbe::addRadixRuntimeStats() {
-  if (radixRuntimeStatsReported_ || radixPartitioner_ == nullptr) {
+  if (radixRuntimeStatsReported_ || !radixPartitionerEverEnabled_) {
     return;
   }
   radixRuntimeStatsReported_ = true;

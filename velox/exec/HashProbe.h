@@ -289,6 +289,7 @@ class HashProbe : public Operator {
   // of the build-side rows have been spilled. Hence, the probe operator needs
   // to spill the corresponding probe-side rows as well.
   bool needToSpillInput() const;
+  bool spillActive() const;
 
   // This ensures there is sufficient buffer reserved to produce the next output
   // batch. This might trigger memory arbitration underneath and the probe
@@ -467,6 +468,7 @@ class HashProbe : public Operator {
   std::shared_ptr<BaseHashTable> table_;
 
   std::unique_ptr<RadixPartitioner> radixPartitioner_;
+  bool radixPartitionerEverEnabled_{false};
   bool radixRuntimeStatsReported_{false};
   vector_size_t radixNumMaxBufferedRows_{0};
   vector_size_t radixMinOutputBatchSize_{0};

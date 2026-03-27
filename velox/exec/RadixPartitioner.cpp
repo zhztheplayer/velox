@@ -46,21 +46,21 @@ RowVectorPtr copyBatches(
 class BufferedRadixPartitioner final : public RadixPartitioner {
  public:
   BufferedRadixPartitioner(
-      BaseHashTable& table,
+      std::shared_ptr<BaseHashTable> table,
       vector_size_t numMaxBufferedRows,
       vector_size_t minOutputBatchSize,
       memory::MemoryPool* pool)
-      : table_(table),
+      : table_(std::move(table)),
         numMaxBufferedRows_(numMaxBufferedRows),
         minOutputBatchSize_(minOutputBatchSize),
         pool_(pool),
-        lookup_(std::make_unique<HashLookup>(table.hashers(), pool)),
-        bufferedRowsPerPartition_(1u << table.radixPartitionBits(), 0),
-        partitionQueues_(1u << table.radixPartitionBits()),
-        partitionReady_(1u << table.radixPartitionBits(), false) {
+        lookup_(std::make_unique<HashLookup>(table_->hashers(), pool)),
+        bufferedRowsPerPartition_(1u << table_->radixPartitionBits(), 0),
+        partitionQueues_(1u << table_->radixPartitionBits()),
+        partitionReady_(1u << table_->radixPartitionBits(), false) {
     VELOX_CHECK_GT(numMaxBufferedRows_, 0);
     VELOX_CHECK_GT(minOutputBatchSize_, 0);
-    VELOX_CHECK(table_.isRadixPartitioned());
+    VELOX_CHECK(table_->isRadixPartitioned());
   }
 
   void addInput(RowVectorPtr input) override {
@@ -158,7 +158,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       hasher->decode(*key, rows);
     }
 
-    const auto mode = table_.hashMode();
+    const auto mode = table_->hashMode();
     for (auto i = 0; i < hashers.size(); ++i) {
       auto& hasher = hashers[i];
       if (mode != BaseHashTable::HashMode::kHash) {
@@ -174,7 +174,25 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
 
     std::vector<vector_size_t> counts(numPartitions(), 0);
     for (auto row : lookup_->rows) {
-      ++counts[table_.getRadixPartition(lookup_->hashes[row])];
+      // lookupValueIds() deselects rows with unmappable values in array and
+      // normalized-key modes. Keep these rows in the buffered probe stream by
+      // routing them to a stable fallback partition instead of reading an
+      // uninitialized value-id/hash slot.
+      const auto partition =
+          mode != BaseHashTable::HashMode::kHash && !rows.isValid(row)
+          ? uint32_t{0}
+          : table_->getRadixPartition(lookup_->hashes[row]);
+      VELOX_CHECK_LT(
+          partition,
+          numPartitions(),
+          "Invalid radix partition {} for hash {} in hash mode {} with {} partitions, radixBits={}, capacity={}",
+          partition,
+          lookup_->hashes[row],
+          BaseHashTable::modeString(table_->hashMode()),
+          numPartitions(),
+          table_->radixPartitionBits(),
+          table_->capacity());
+      ++counts[partition];
     }
 
     std::vector<std::vector<vector_size_t>> partitionRows(numPartitions());
@@ -182,8 +200,21 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       partitionRows[partition].reserve(counts[partition]);
     }
     for (auto row : lookup_->rows) {
-      partitionRows[table_.getRadixPartition(lookup_->hashes[row])].push_back(
-          row);
+      const auto partition =
+          mode != BaseHashTable::HashMode::kHash && !rows.isValid(row)
+          ? uint32_t{0}
+          : table_->getRadixPartition(lookup_->hashes[row]);
+      VELOX_CHECK_LT(
+          partition,
+          numPartitions(),
+          "Invalid radix partition {} for hash {} in hash mode {} with {} partitions, radixBits={}, capacity={}",
+          partition,
+          lookup_->hashes[row],
+          BaseHashTable::modeString(table_->hashMode()),
+          numPartitions(),
+          table_->radixPartitionBits(),
+          table_->capacity());
+      partitionRows[partition].push_back(row);
     }
     return partitionRows;
   }
@@ -197,7 +228,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   }
 
  private:
-  BaseHashTable& table_;
+  const std::shared_ptr<BaseHashTable> table_;
   const vector_size_t numMaxBufferedRows_;
   const vector_size_t minOutputBatchSize_;
   memory::MemoryPool* const pool_;
@@ -212,12 +243,24 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
 } // namespace
 
 std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
-    BaseHashTable& table,
+    std::shared_ptr<BaseHashTable> table,
     vector_size_t numMaxBufferedRows,
     vector_size_t minOutputBatchSize,
     memory::MemoryPool* pool) {
   return std::make_unique<BufferedRadixPartitioner>(
-      table, numMaxBufferedRows, minOutputBatchSize, pool);
+      std::move(table), numMaxBufferedRows, minOutputBatchSize, pool);
+}
+
+std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
+    BaseHashTable& table,
+    vector_size_t numMaxBufferedRows,
+    vector_size_t minOutputBatchSize,
+    memory::MemoryPool* pool) {
+  return createBuffered(
+      std::shared_ptr<BaseHashTable>(&table, [](BaseHashTable*) {}),
+      numMaxBufferedRows,
+      minOutputBatchSize,
+      pool);
 }
 
 } // namespace facebook::velox::exec
