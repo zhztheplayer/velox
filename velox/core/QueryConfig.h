@@ -1467,7 +1467,7 @@ class QueryConfig {
   vector_size_t radixJoinMaxBufferedRowsPerPartition() const {
     const auto rows = get<uint32_t>(
         kRadixJoinMaxBufferedRowsPerPartition,
-        std::numeric_limits<uint32_t>::max());
+        std::numeric_limits<vector_size_t>::max());
     VELOX_USER_CHECK_LE(rows, std::numeric_limits<vector_size_t>::max());
     return rows;
   }
