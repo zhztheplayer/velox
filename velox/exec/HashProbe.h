@@ -45,8 +45,8 @@ class HashProbe : public Operator {
       "radixPrepareInputWallNanos";
   static constexpr std::string_view kRadixInputRows = "radixInputRows";
   static constexpr std::string_view kRadixOutputRows = "radixOutputRows";
-  static constexpr std::string_view kRadixOutputBatches =
-      "radixOutputBatches";
+  static constexpr std::string_view kRadixOutputVectors =
+      "radixOutputVectors";
 
   HashProbe(
       int32_t operatorId,
@@ -475,7 +475,7 @@ class HashProbe : public Operator {
   uint64_t radixPrepareInputWallNanos_{0};
   uint64_t radixInputRows_{0};
   uint64_t radixOutputRows_{0};
-  uint64_t radixOutputBatches_{0};
+  uint64_t radixOutputVectors_{0};
 
   // Indicates whether there was no input. Used for right semi join project.
   bool noInput_{true};

@@ -3027,7 +3027,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
       })
       .run();
 }
@@ -3060,7 +3060,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
       })
       .run();
 }
@@ -3114,7 +3114,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
       })
       .run();
 }
@@ -3199,7 +3199,7 @@ TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
         ASSERT_EQ(
             probeStats.count(std::string(HashProbe::kRadixOutputRows)), 0);
         ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputBatches)), 0);
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
       })
       .run();
 
@@ -3310,7 +3310,7 @@ TEST_P(HashJoinTest, radixJoinDisabledByMinTableBytes) {
         ASSERT_EQ(
             opStats.at("HashProbe")
                 .runtimeStats.count(
-                    std::string(HashProbe::kRadixOutputBatches)),
+                    std::string(HashProbe::kRadixOutputVectors)),
             0);
       })
       .run();
@@ -3420,7 +3420,7 @@ TEST_P(HashJoinTest, radixJoinDisabledByMaxTableBytes) {
         ASSERT_EQ(
             opStats.at("HashProbe")
                 .runtimeStats.count(
-                    std::string(HashProbe::kRadixOutputBatches)),
+                    std::string(HashProbe::kRadixOutputVectors)),
             0);
       })
       .run();
@@ -3531,7 +3531,7 @@ TEST_P(HashJoinTest, radixJoinStatsEnabled) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
       })
       .run();
 }
@@ -3632,7 +3632,7 @@ TEST_P(HashJoinTest, radixJoinEnabledWhenSpillConfiguredButInactive) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
         ASSERT_TRUE(radixBuildTriggered);
         ASSERT_TRUE(radixProbeTriggered);
       })
@@ -3746,7 +3746,7 @@ TEST_P(HashJoinTest, radixJoinDrainsWhenProbeSpillStarts) {
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixOutputRows)).sum, 0);
         ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputBatches)).sum, 0);
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
       })
       .run();
 }
@@ -3845,7 +3845,7 @@ TEST_P(HashJoinTest, radixJoinStatsDisabled) {
         ASSERT_EQ(
             probeStats.count(std::string(HashProbe::kRadixOutputRows)), 0);
         ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputBatches)), 0);
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
       })
       .run();
 }

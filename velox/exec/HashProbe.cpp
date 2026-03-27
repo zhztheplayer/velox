@@ -773,7 +773,7 @@ void HashProbe::maybeLoadRadixPartitionedInput() {
     return;
   }
   radixOutputRows_ += input_->size();
-  ++radixOutputBatches_;
+  ++radixOutputVectors_;
   TestValue::adjust(
       "facebook::velox::exec::HashProbe::beforeProbeRadixBatch", this);
   addInputInternal(std::move(input_));
@@ -1964,8 +1964,8 @@ void HashProbe::addRadixRuntimeStats() {
       std::string(HashProbe::kRadixOutputRows),
       RuntimeCounter(radixOutputRows_));
   addRuntimeStat(
-      std::string(HashProbe::kRadixOutputBatches),
-      RuntimeCounter(radixOutputBatches_));
+      std::string(HashProbe::kRadixOutputVectors),
+      RuntimeCounter(radixOutputVectors_));
 }
 
 bool HashProbe::isFinished() {
