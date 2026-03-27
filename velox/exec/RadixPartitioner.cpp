@@ -172,17 +172,17 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
     lookup_->rows.resize(input->size());
     std::iota(lookup_->rows.begin(), lookup_->rows.end(), 0);
 
-    std::vector<vector_size_t> counts(numPartitions(), 0);
-    for (auto row : lookup_->rows) {
+    auto rowPartition = [&](vector_size_t row) {
       // lookupValueIds() deselects rows with unmappable values in array and
       // normalized-key modes. Keep these rows in the buffered probe stream by
       // routing them to a stable fallback partition instead of reading an
       // uninitialized value-id/hash slot.
-      const auto partition =
-          mode != BaseHashTable::HashMode::kHash && !rows.isValid(row)
-          ? uint32_t{0}
-          : table_->getRadixPartition(lookup_->hashes[row]);
-      VELOX_CHECK_LT(
+      if (mode != BaseHashTable::HashMode::kHash && !rows.isValid(row)) {
+        return uint32_t{0};
+      }
+
+      const auto partition = table_->getRadixPartition(lookup_->hashes[row]);
+      VELOX_DCHECK_LT(
           partition,
           numPartitions(),
           "Invalid radix partition {} for hash {} in hash mode {} with {} partitions, radixBits={}, capacity={}",
@@ -192,7 +192,12 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
           numPartitions(),
           table_->radixPartitionBits(),
           table_->capacity());
-      ++counts[partition];
+      return partition;
+    };
+
+    std::vector<vector_size_t> counts(numPartitions(), 0);
+    for (auto row : lookup_->rows) {
+      ++counts[rowPartition(row)];
     }
 
     std::vector<std::vector<vector_size_t>> partitionRows(numPartitions());
@@ -200,21 +205,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       partitionRows[partition].reserve(counts[partition]);
     }
     for (auto row : lookup_->rows) {
-      const auto partition =
-          mode != BaseHashTable::HashMode::kHash && !rows.isValid(row)
-          ? uint32_t{0}
-          : table_->getRadixPartition(lookup_->hashes[row]);
-      VELOX_CHECK_LT(
-          partition,
-          numPartitions(),
-          "Invalid radix partition {} for hash {} in hash mode {} with {} partitions, radixBits={}, capacity={}",
-          partition,
-          lookup_->hashes[row],
-          BaseHashTable::modeString(table_->hashMode()),
-          numPartitions(),
-          table_->radixPartitionBits(),
-          table_->capacity());
-      partitionRows[partition].push_back(row);
+      partitionRows[rowPartition(row)].push_back(row);
     }
     return partitionRows;
   }
