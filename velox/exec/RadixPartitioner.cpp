@@ -55,6 +55,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
         minOutputBatchSize_(minOutputBatchSize),
         pool_(pool),
         lookup_(std::make_unique<HashLookup>(table_->hashers(), pool)),
+        partitionRows_(1u << table_->radixPartitionBits()),
         bufferedRowsPerPartition_(1u << table_->radixPartitionBits(), 0),
         partitionQueues_(1u << table_->radixPartitionBits()),
         partitionReady_(1u << table_->radixPartitionBits(), false) {
@@ -68,10 +69,9 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
     if (input->size() == 0) {
       return;
     }
-
-    auto partitionRows = partitionInput(input);
+    partitionInput(input);
     for (auto partition = 0; partition < numPartitions(); ++partition) {
-      auto& rows = partitionRows[partition];
+      auto& rows = partitionRows_[partition];
       if (rows.empty()) {
         continue;
       }
@@ -147,8 +147,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   }
 
  private:
-  std::vector<std::vector<vector_size_t>> partitionInput(
-      const RowVectorPtr& input) const {
+  void partitionInput(const RowVectorPtr& input) {
     SelectivityVector rows(input->size());
     auto& hashers = lookup_->hashers;
     lookup_->reset(rows.end());
@@ -195,19 +194,12 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       return partition;
     };
 
-    std::vector<vector_size_t> counts(numPartitions(), 0);
-    for (auto row : lookup_->rows) {
-      ++counts[rowPartition(row)];
-    }
-
-    std::vector<std::vector<vector_size_t>> partitionRows(numPartitions());
-    for (auto partition = 0; partition < numPartitions(); ++partition) {
-      partitionRows[partition].reserve(counts[partition]);
+    for (auto& partitionRows : partitionRows_) {
+      partitionRows.clear();
     }
     for (auto row : lookup_->rows) {
-      partitionRows[rowPartition(row)].push_back(row);
+      partitionRows_[rowPartition(row)].push_back(row);
     }
-    return partitionRows;
   }
 
   void markReady(int32_t partition) {
@@ -224,6 +216,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   const vector_size_t minOutputBatchSize_;
   memory::MemoryPool* const pool_;
   std::unique_ptr<HashLookup> lookup_;
+  std::vector<std::vector<vector_size_t>> partitionRows_;
   std::vector<vector_size_t> bufferedRowsPerPartition_;
   std::vector<std::deque<RowVectorPtr>> partitionQueues_;
   std::vector<bool> partitionReady_;
