@@ -2866,35 +2866,89 @@ TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
   constexpr int32_t kNumBatches = 16;
   constexpr int32_t kRowsPerBatch = 64;
   auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
+    std::vector<std::string> keys0;
+    std::vector<std::string> keys1;
+    std::vector<std::string> keys2;
+    std::vector<std::string> keys3;
+    std::vector<std::string> keys4;
+    std::vector<std::string> keys5;
+    std::vector<std::string> keys6;
     std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
+    keys0.reserve(kRowsPerBatch);
+    keys1.reserve(kRowsPerBatch);
+    keys2.reserve(kRowsPerBatch);
+    keys3.reserve(kRowsPerBatch);
+    keys4.reserve(kRowsPerBatch);
+    keys5.reserve(kRowsPerBatch);
+    keys6.reserve(kRowsPerBatch);
     values.reserve(kRowsPerBatch);
     for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
+      keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
+      keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
+      keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
+      keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
+      keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
+      keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
       values.push_back(batchIndex * kRowsPerBatch + row);
     }
     return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
+        makeFlatVector<std::string>(keys0),
+        makeFlatVector<std::string>(keys1),
+        makeFlatVector<std::string>(keys2),
+        makeFlatVector<std::string>(keys3),
+        makeFlatVector<std::string>(keys4),
+        makeFlatVector<std::string>(keys5),
+        makeFlatVector<std::string>(keys6),
         makeFlatVector<int64_t>(values),
     });
   });
 
   auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
+    std::vector<std::string> keys0;
+    std::vector<std::string> keys1;
+    std::vector<std::string> keys2;
+    std::vector<std::string> keys3;
+    std::vector<std::string> keys4;
+    std::vector<std::string> keys5;
+    std::vector<std::string> keys6;
     std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
+    keys0.reserve(kRowsPerBatch);
+    keys1.reserve(kRowsPerBatch);
+    keys2.reserve(kRowsPerBatch);
+    keys3.reserve(kRowsPerBatch);
+    keys4.reserve(kRowsPerBatch);
+    keys5.reserve(kRowsPerBatch);
+    keys6.reserve(kRowsPerBatch);
     values.reserve(kRowsPerBatch);
     for (auto row = 0; row < kRowsPerBatch; ++row) {
       if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+        keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
+        keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
+        keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
+        keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
+        keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
+        keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
+        keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
       } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+        keys0.push_back(fmt::format("right0_{}_{}", batchIndex, row));
+        keys1.push_back(fmt::format("right1_{}_{}", batchIndex, row));
+        keys2.push_back(fmt::format("right2_{}_{}", batchIndex, row));
+        keys3.push_back(fmt::format("right3_{}_{}", batchIndex, row));
+        keys4.push_back(fmt::format("right4_{}_{}", batchIndex, row));
+        keys5.push_back(fmt::format("right5_{}_{}", batchIndex, row));
+        keys6.push_back(fmt::format("right6_{}_{}", batchIndex, row));
       }
       values.push_back(batchIndex * kRowsPerBatch + row);
     }
     return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
+        makeFlatVector<std::string>(keys0),
+        makeFlatVector<std::string>(keys1),
+        makeFlatVector<std::string>(keys2),
+        makeFlatVector<std::string>(keys3),
+        makeFlatVector<std::string>(keys4),
+        makeFlatVector<std::string>(keys5),
+        makeFlatVector<std::string>(keys6),
         makeFlatVector<int64_t>(values),
     });
   });
@@ -2905,16 +2959,34 @@ TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
   auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
   auto plan = PlanBuilder(planNodeIdGenerator)
                   .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
+                  .project({
+                      "c0 AS t0",
+                      "c1 AS t1",
+                      "c2 AS t2",
+                      "c3 AS t3",
+                      "c4 AS t4",
+                      "c5 AS t5",
+                      "c6 AS t6",
+                      "c7 AS t7",
+                  })
                   .hashJoin(
-                      {"t0"},
-                      {"u0"},
+                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6"},
+                      {"u0", "u1", "u2", "u3", "u4", "u5", "u6"},
                       PlanBuilder(planNodeIdGenerator)
                           .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
+                          .project({
+                              "c0 AS u0",
+                              "c1 AS u1",
+                              "c2 AS u2",
+                              "c3 AS u3",
+                              "c4 AS u4",
+                              "c5 AS u5",
+                              "c6 AS u6",
+                              "c7 AS u7",
+                          })
                           .planNode(),
                       "",
-                      {"t0", "t1", "u1"},
+                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "u7"},
                       core::JoinType::kInner)
                   .planNode();
 
@@ -2954,7 +3026,10 @@ TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
       .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
       .planNode(plan)
       .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+          "SELECT t.c0, t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, u.c7 "
+          "FROM t INNER JOIN u ON t.c0 = u.c0 AND t.c1 = u.c1 AND "
+          "t.c2 = u.c2 AND t.c3 = u.c3 AND t.c4 = u.c4 AND "
+          "t.c5 = u.c5 AND t.c6 = u.c6")
       .run();
 
   ASSERT_TRUE(sawFinalHashMode);
@@ -3010,7 +3085,6 @@ TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
 }
 
 TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
-  bool sawArrayModeBeforeNormalization{false};
   bool sawFinalHashMode{false};
   bool radixBuildTriggered{false};
   bool radixProbeTriggered{false};
@@ -3033,21 +3107,12 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
   }
 
   SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeForceGenericForRadixBuild",
-      std::function<void(void*)>([&](void* arg) {
-        auto* table = static_cast<BaseHashTable*>(arg);
-        ASSERT_NE(table, nullptr);
-        ASSERT_FALSE(table->isRadixPartitioned());
-        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
-        sawArrayModeBeforeNormalization = true;
-      }));
-  SCOPED_TESTVALUE_SET(
       "facebook::velox::exec::HashBuild::beforeRadixBuild",
       std::function<void(void*)>([&](void* arg) {
         auto* table = static_cast<BaseHashTable*>(arg);
         ASSERT_NE(table, nullptr);
         ASSERT_FALSE(table->isRadixPartitioned());
-        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
         radixBuildTriggered = true;
       }));
   SCOPED_TESTVALUE_SET(
@@ -3056,7 +3121,7 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
         auto* table = static_cast<BaseHashTable*>(arg);
         ASSERT_NE(table, nullptr);
         ASSERT_TRUE(table->isRadixPartitioned());
-        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+        ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
         sawFinalHashMode = true;
       }));
   SCOPED_TESTVALUE_SET(
@@ -3080,7 +3145,6 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
           "SELECT t.c0, t.c1, u.c0, u.c1 FROM t, u WHERE t.c0 = u.c0")
       .run();
 
-  ASSERT_TRUE(sawArrayModeBeforeNormalization);
   ASSERT_TRUE(sawFinalHashMode);
   ASSERT_TRUE(radixBuildTriggered);
   ASSERT_TRUE(radixProbeTriggered);

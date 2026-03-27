@@ -823,9 +823,17 @@ bool HashTable<ignoreNullKeys>::canBuildRadixPartitions(
     return false;
   }
 
-  if (hashMode_ != HashMode::kHash &&
-      hashMode_ != HashMode::kNormalizedKey) {
+  if (hashMode_ != HashMode::kHash && hashMode_ != HashMode::kNormalizedKey &&
+      hashMode_ != HashMode::kArray) {
     return false;
+  }
+
+  if (hashMode_ == HashMode::kArray) {
+    if (capacity_ <= 1) {
+      return false;
+    }
+    const auto maxRadixBits = 64 - __builtin_clzll(capacity_ - 1);
+    return numRadixBits <= maxRadixBits;
   }
 
   const auto bucketBits = __builtin_ctzll(kBucketSize);
@@ -836,6 +844,11 @@ bool HashTable<ignoreNullKeys>::canBuildRadixPartitions(
 template <bool ignoreNullKeys>
 uint32_t HashTable<ignoreNullKeys>::getRadixPartition(uint64_t hash) const {
   VELOX_CHECK_GT(radixPartitionBits_, 0);
+  if (hashMode_ == HashMode::kArray) {
+    VELOX_CHECK_GT(capacity_, 1);
+    const auto sizeBits = 64 - __builtin_clzll(capacity_ - 1);
+    return hash >> (sizeBits - radixPartitionBits_);
+  }
   // Radix partitioning is derived from the highest bits of the bucket-aligned
   // table offset so each partition maps to one contiguous address range.
   return bucketOffset(hash) >> (sizeBits_ - radixPartitionBits_);
@@ -952,7 +965,15 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   numTombstones_ = 0;
 
   if (numDistinct_ > 0) {
-    checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);
+    if (hashMode_ == HashMode::kArray) {
+      decideHashMode(
+          0,
+          BaseHashTable::kNoSpillInputStartPartitionBit,
+          disableRangeArrayHash_);
+      VELOX_CHECK_EQ(hashMode_, HashMode::kArray);
+    } else {
+      checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);
+    }
   }
   isRadixPartitioned_ = true;
 }

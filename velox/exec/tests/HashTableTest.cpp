@@ -1054,20 +1054,17 @@ TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
       {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
 
   ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
-  ASSERT_FALSE(table->canBuildRadixPartitions(2));
-
-  table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
-  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
   ASSERT_TRUE(table->canBuildRadixPartitions(2));
 
   table->buildRadixPartitions(2);
 
-  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
   ASSERT_TRUE(table->isRadixPartitioned());
 
   auto testHelper = HashTableTestHelper<true>::create(table.get());
   assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
-  assertProbeRowsClusteredByRadixPartition(table.get(), buildBatch, pool());
+  assertProbeRowsClusteredByRadixPartition(
+      table.get(), buildBatch, pool(), false);
 }
 
 TEST_P(HashTableTest, listJoinResultsSize) {

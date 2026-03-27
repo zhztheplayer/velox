@@ -954,16 +954,6 @@ bool HashBuild::finishHashBuild() {
       radixPartitionBits > 0 &&
       estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
       estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
-    // Array mode has no bucket-addressed layout, so normalize it to generic
-    // hash mode before attempting the radix rebuild. Hash and normalized-key
-    // modes are allowed to proceed directly.
-    if (table_->hashMode() == BaseHashTable::HashMode::kArray) {
-      TestValue::adjust(
-          "facebook::velox::exec::HashBuild::beforeForceGenericForRadixBuild",
-          table_.get());
-      table_->forceGenericHashMode(
-          BaseHashTable::kNoSpillInputStartPartitionBit);
-    }
     if (table_->canBuildRadixPartitions(radixPartitionBits)) {
       TestValue::adjust(
           "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
