@@ -462,6 +462,51 @@ void HashProbe::asyncWaitForHashTable() {
 
   VELOX_CHECK_NOT_NULL(table_);
 
+  if (table_->isRadixPartitioned() && !canSpill()) {
+    // Keep radix-partitioned probe buffering on the simple in-memory path.
+    const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+    const auto buildRows = static_cast<vector_size_t>(table_->rows()->numRows());
+    const auto numRadixPartitions =
+        vector_size_t{1} << table_->radixPartitionBits();
+    const auto bufferedRowsFromFactor =
+        std::max<vector_size_t>(
+            1,
+            static_cast<vector_size_t>(
+                queryConfig.radixJoinMaxBufferedRowsMultiplier()) *
+                buildRows / numRadixPartitions);
+    const auto numMaxBufferedRows = std::min(
+        queryConfig.radixJoinMaxBufferedRowsPerPartition(),
+        bufferedRowsFromFactor);
+    const auto minOutputBatchSize =
+        std::max<vector_size_t>(
+            1,
+            queryConfig.radixJoinMinOutputBatchRows() == 0
+                ? outputBatchSize_
+                : queryConfig.radixJoinMinOutputBatchRows());
+    radixNumMaxBufferedRows_ = std::max<vector_size_t>(1, numMaxBufferedRows);
+    radixMinOutputBatchSize_ = minOutputBatchSize;
+    radixPartitioner_ = RadixPartitioner::createBuffered(
+        *table_,
+        radixNumMaxBufferedRows_,
+        minOutputBatchSize,
+        pool());
+  } else {
+    radixNumMaxBufferedRows_ = 0;
+    radixMinOutputBatchSize_ = 0;
+    radixPartitioner_.reset();
+  }
+  addRuntimeStat(
+      std::string(HashProbe::kRadixPartitionerEnabled),
+      RuntimeCounter(radixPartitioner_ != nullptr));
+  if (radixPartitioner_ != nullptr) {
+    addRuntimeStat(
+        std::string(HashProbe::kRadixMaxBufferedRowsPerPartition),
+        RuntimeCounter(radixNumMaxBufferedRows_));
+    addRuntimeStat(
+        std::string(HashProbe::kRadixMinOutputBatchRows),
+        RuntimeCounter(radixMinOutputBatchSize_));
+  }
+
   maybeSetupSpillInputReader(hashBuildResult->restoredPartitionId);
   maybeSetupInputSpiller(hashBuildResult->spillPartitionIds);
   checkMaxSpillLevel(hashBuildResult->restoredPartitionId);
@@ -696,26 +741,85 @@ void HashProbe::decodeAndDetectNonNullKeys() {
   }
 }
 
+bool HashProbe::maybeLoadRadixPartitionedInput() {
+  if (input_ != nullptr || radixPartitioner_ == nullptr) {
+    return input_ != nullptr;
+  }
+
+  CpuWallTiming radixTiming;
+  {
+    CpuWallTimer cpuWallTimer{radixTiming};
+    input_ = radixPartitioner_->getOutput();
+  }
+  radixPrepareInputWallNanos_ += radixTiming.wallNanos;
+  if (input_ != nullptr) {
+    radixOutputRows_ += input_->size();
+    ++radixOutputBatches_;
+    decodeAndDetectNonNullKeys();
+    prepareInputForProbe();
+    return input_ != nullptr;
+  }
+  return false;
+}
+
+void HashProbe::prepareInputForProbe() {
+  activeRows_ = nonNullInputRows_;
+
+  {
+    auto lockedStats = stats_.wlock();
+    lockedStats->numNullKeys +=
+        activeRows_.size() - activeRows_.countSelected();
+  }
+
+  table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
+
+  const auto numInput = input_->size();
+  if (joinIncludesMissesFromLeft(joinType_)) {
+    auto& hits = lookup_->hits;
+    hits.resize(numInput);
+    std::fill(hits.data(), hits.data() + numInput, nullptr);
+    if (!lookup_->rows.empty()) {
+      table_->joinProbe(*lookup_);
+    }
+
+    auto& rows = lookup_->rows;
+    rows.resize(numInput);
+    std::iota(rows.begin(), rows.end(), 0);
+  } else {
+    if (lookup_->rows.empty()) {
+      input_ = nullptr;
+      return;
+    }
+    lookup_->hits.resize(lookup_->rows.back() + 1);
+    table_->joinProbe(*lookup_);
+  }
+
+  resultIter_->reset(*lookup_);
+}
+
 void HashProbe::addInput(RowVectorPtr input) {
   if (skipInput_) {
     VELOX_CHECK_NULL(input_);
     return;
   }
-  input_ = std::move(input);
+  auto rawInput = std::move(input);
 
   // Reset passingInputRowsInitialized_ as input_ as changed.
   passingInputRowsInitialized_ = false;
 
-  const auto numInput = input_->size();
+  const auto numInput = rawInput->size();
 
   if (numInput > 0) {
     noInput_ = false;
   }
 
   if (canReplaceWithDynamicFilter_) {
+    input_ = std::move(rawInput);
     replacedWithDynamicFilter_ = true;
     return;
   }
+
+  input_ = std::move(rawInput);
 
   bool hasDecoded = false;
 
@@ -752,51 +856,23 @@ void HashProbe::addInput(RowVectorPtr input) {
     return;
   }
 
-  if (!hasDecoded) {
-    decodeAndDetectNonNullKeys();
-  }
-  activeRows_ = nonNullInputRows_;
-
-  // Update statistics for null keys in join operator.
-  // Updating here means we will report 0 null keys when build side is empty.
-  // If we want more accurate stats, we will have to decode input vector
-  // even when not needed. So we tradeoff less accurate stats for more
-  // performance.
-  {
-    auto lockedStats = stats_.wlock();
-    lockedStats->numNullKeys +=
-        activeRows_.size() - activeRows_.countSelected();
-  }
-
-  table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
-
-  if (joinIncludesMissesFromLeft(joinType_)) {
-    // Make sure to allocate an entry in 'hits' for every input row to allow for
-    // including rows without a match in the output. Also, make sure to
-    // initialize all 'hits' to nullptr as HashTable::joinProbe will only
-    // process activeRows_.
-    auto& hits = lookup_->hits;
-    hits.resize(numInput);
-    std::fill(hits.data(), hits.data() + numInput, nullptr);
-    if (!lookup_->rows.empty()) {
-      table_->joinProbe(*lookup_);
+  if (radixPartitioner_ != nullptr) {
+    CpuWallTiming radixTiming;
+    {
+      CpuWallTimer cpuWallTimer{radixTiming};
+      radixPartitioner_->addInput(std::move(input_));
     }
-
-    // Update lookup_->rows to include all input rows, not just
-    // activeRows_ as we need to include all rows in the output.
-    auto& rows = lookup_->rows;
-    rows.resize(numInput);
-    std::iota(rows.begin(), rows.end(), 0);
-  } else {
-    if (lookup_->rows.empty()) {
-      input_ = nullptr;
+    radixPrepareInputWallNanos_ += radixTiming.wallNanos;
+    radixInputRows_ += numInput;
+    if (!maybeLoadRadixPartitionedInput()) {
       return;
     }
-    lookup_->hits.resize(lookup_->rows.back() + 1);
-    table_->joinProbe(*lookup_);
+  } else {
+    if (!hasDecoded) {
+      decodeAndDetectNonNullKeys();
+    }
+    prepareInputForProbe();
   }
-
-  resultIter_->reset(*lookup_);
 }
 
 void HashProbe::prepareOutput(vector_size_t size) {
@@ -1077,6 +1153,12 @@ RowVectorPtr HashProbe::getOutputInternal(bool toSpillOutput) {
   }
 
   clearProjectedOutput();
+
+  maybeLoadRadixPartitionedInput();
+  if (!input_ && radixPartitioner_ != nullptr && noMoreInput_ &&
+      !noMoreSpillInput_) {
+    noMoreInputInternal();
+  }
 
   if (!input_) {
     if (hasMoreInput()) {
@@ -1773,6 +1855,14 @@ void HashProbe::ensureLoaded(column_index_t channel) {
 
 void HashProbe::noMoreInput() {
   Operator::noMoreInput();
+  if (radixPartitioner_ != nullptr) {
+    radixPartitioner_->noMoreInput();
+    maybeLoadRadixPartitionedInput();
+    if (!input_ && !noMoreSpillInput_) {
+      noMoreInputInternal();
+    }
+    return;
+  }
   noMoreInputInternal();
 }
 
@@ -1836,6 +1926,27 @@ void HashProbe::noMoreInputInternal() {
   if (outputBuildRowsInParallel) {
     wakeupPeerOperators();
   }
+}
+
+void HashProbe::addRadixRuntimeStats() {
+  if (radixRuntimeStatsReported_ || radixPartitioner_ == nullptr) {
+    return;
+  }
+  radixRuntimeStatsReported_ = true;
+  addRuntimeStat(
+      std::string(HashProbe::kRadixPrepareInputWallNanos),
+      RuntimeCounter(
+          radixPrepareInputWallNanos_,
+          RuntimeCounter::Unit::kNanos));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixInputRows),
+      RuntimeCounter(radixInputRows_));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixOutputRows),
+      RuntimeCounter(radixOutputRows_));
+  addRuntimeStat(
+      std::string(HashProbe::kRadixOutputBatches),
+      RuntimeCounter(radixOutputBatches_));
 }
 
 bool HashProbe::isFinished() {
@@ -2165,6 +2276,8 @@ void HashProbe::checkMaxSpillLevel(
 
 void HashProbe::close() {
   Operator::close();
+
+  addRadixRuntimeStats();
 
   // Free up major memory usage.
   joinBridge_.reset();

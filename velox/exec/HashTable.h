@@ -373,6 +373,16 @@ class BaseHashTable {
   /// not freed which can be used for flushing a partial group by, for example.
   virtual void clear(bool freeTable) = 0;
 
+  virtual bool canBuildRadixPartitions(uint8_t numRadixBits) const = 0;
+
+  virtual void buildRadixPartitions(uint8_t numRadixBits) = 0;
+
+  virtual uint32_t getRadixPartition(uint64_t hash) const = 0;
+
+  virtual uint8_t radixPartitionBits() const = 0;
+
+  virtual bool isRadixPartitioned() const = 0;
+
   /// Returns the capacity of the internal hash table which is number of rows
   /// it can stores in a group by or hash join build.
   virtual uint64_t capacity() const = 0;
@@ -711,6 +721,20 @@ class HashTable : public BaseHashTable {
       bool dropDuplicates = false,
       folly::Executor* executor = nullptr) override;
 
+  bool canBuildRadixPartitions(uint8_t numRadixBits) const override;
+
+  void buildRadixPartitions(uint8_t numRadixBits) override;
+
+  uint32_t getRadixPartition(uint64_t hash) const override;
+
+  uint8_t radixPartitionBits() const override {
+    return radixPartitionBits_;
+  }
+
+  bool isRadixPartitioned() const override {
+    return isRadixPartitioned_;
+  }
+
   void prepareForJoinProbe(
       HashLookup& lookup,
       const RowVectorPtr& input,
@@ -911,6 +935,10 @@ class HashTable : public BaseHashTable {
   void clearUseRange(std::vector<bool>& useRange);
 
   void rehash(bool initNormalizedKeys, int8_t spillInputStartPartitionBit);
+
+  std::unique_ptr<RowContainer> newRowContainer() const;
+
+  void refreshColumnHasNulls();
 
   uint64_t rehashSize() const {
     return rehashSize(capacity_ - numTombstones_);
@@ -1194,6 +1222,8 @@ class HashTable : public BaseHashTable {
   int64_t numTombstones_{0};
   // Counts the number of rehash() calls.
   int64_t numRehashes_{0};
+  uint8_t radixPartitionBits_{0};
+  bool isRadixPartitioned_{false};
   HashMode hashMode_ = HashMode::kArray;
   // Owns the memory of multiple build side hash join tables that are
   // combined into a single probe hash table.

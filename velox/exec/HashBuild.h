@@ -63,6 +63,16 @@ class HashBuild final : public Operator {
   /// Whether dedup hash build was abandoned.
   static constexpr std::string_view kAbandonBuildNoDupHash =
       "abandonBuildNoDupHash";
+  static constexpr std::string_view kRadixEnabled = "radixEnabled";
+  static constexpr std::string_view kRadixBits = "radixBits";
+  static constexpr std::string_view kRadixEstimatedTableBytes =
+      "radixEstimatedTableBytes";
+  static constexpr std::string_view kRadixDisabledByMinTableBytes =
+      "radixDisabledByMinTableBytes";
+  static constexpr std::string_view kRadixDisabledByMaxTableBytes =
+      "radixDisabledByMaxTableBytes";
+  static constexpr std::string_view kRadixBuildWallNanos =
+      "radixBuildWallNanos";
 
   HashBuild(
       int32_t operatorId,

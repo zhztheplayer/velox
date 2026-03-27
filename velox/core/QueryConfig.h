@@ -588,6 +588,33 @@ class QueryConfig {
   static constexpr const char* kMinTableRowsForParallelJoinBuild =
       "min_table_rows_for_parallel_join_build";
 
+  /// Number of radix bits to use for radix-partitioned hash join build/probe.
+  /// Zero disables radix join.
+  static constexpr const char* kRadixJoinBits = "radix_join_bits";
+
+  /// Minimum estimated hash table size in bytes to enable radix join.
+  static constexpr const char* kRadixJoinMinTableBytes =
+      "radix_join_min_table_bytes";
+
+  /// Maximum estimated hash table size in bytes to enable radix join.
+  static constexpr const char* kRadixJoinMaxTableBytes =
+      "radix_join_max_table_bytes";
+
+  /// Maximum number of buffered probe rows per radix partition.
+  static constexpr const char* kRadixJoinMaxBufferedRowsPerPartition =
+      "radix_join_max_buffered_rows_per_partition";
+
+  /// Minimum number of rows to include in one radix-partitioned probe output
+  /// batch. Zero means to use the operator output batch size.
+  static constexpr const char* kRadixJoinMinOutputBatchRows =
+      "radix_join_min_output_batch_rows";
+
+  /// Multiplier used to derive the per-partition buffered probe rows from the
+  /// build-side row count. The effective limit is the minimum of this value
+  /// multiplied by build rows and kRadixJoinMaxBufferedRowsPerPartition.
+  static constexpr const char* kRadixJoinMaxBufferedRowsMultiplier =
+      "radix_join_max_buffered_rows_multiplier";
+
   /// If set to true, then during execution of tasks, the output vectors of
   /// every operator are validated for consistency. This is an expensive check
   /// so should only be used for debugging. It can help debug issues where
@@ -1422,6 +1449,37 @@ class QueryConfig {
 
   uint32_t minTableRowsForParallelJoinBuild() const {
     return get<uint32_t>(kMinTableRowsForParallelJoinBuild, 1'000);
+  }
+
+  uint8_t radixJoinBits() const {
+    return get<uint8_t>(kRadixJoinBits, 0);
+  }
+
+  uint64_t radixJoinMinTableBytes() const {
+    return get<uint64_t>(kRadixJoinMinTableBytes, 0);
+  }
+
+  uint64_t radixJoinMaxTableBytes() const {
+    return get<uint64_t>(
+        kRadixJoinMaxTableBytes, std::numeric_limits<uint64_t>::max());
+  }
+
+  vector_size_t radixJoinMaxBufferedRowsPerPartition() const {
+    const auto rows = get<uint32_t>(
+        kRadixJoinMaxBufferedRowsPerPartition,
+        std::numeric_limits<uint32_t>::max());
+    VELOX_USER_CHECK_LE(rows, std::numeric_limits<vector_size_t>::max());
+    return rows;
+  }
+
+  vector_size_t radixJoinMinOutputBatchRows() const {
+    const auto rows = get<uint32_t>(kRadixJoinMinOutputBatchRows, 0);
+    VELOX_USER_CHECK_LE(rows, std::numeric_limits<vector_size_t>::max());
+    return rows;
+  }
+
+  uint32_t radixJoinMaxBufferedRowsMultiplier() const {
+    return get<uint32_t>(kRadixJoinMaxBufferedRowsMultiplier, 10);
   }
 
   bool validateOutputFromOperators() const {

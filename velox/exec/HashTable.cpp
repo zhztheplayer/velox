@@ -731,6 +731,7 @@ void HashTable<ignoreNullKeys>::allocateTables(
     int8_t spillInputStartPartitionBit) {
   VELOX_CHECK(bits::isPowerOfTwo(size), "Size is not a power of two: {}", size);
   VELOX_CHECK_GT(size, 0);
+  isRadixPartitioned_ = false;
   capacity_ = size;
   const uint64_t byteSize = capacity_ * tableSlotSize();
   VELOX_CHECK_EQ(byteSize % kBucketSize, 0);
@@ -767,6 +768,193 @@ void HashTable<ignoreNullKeys>::clear(bool freeTable) {
   }
   numDistinct_ = 0;
   numTombstones_ = 0;
+  radixPartitionBits_ = 0;
+  isRadixPartitioned_ = false;
+}
+
+template <bool ignoreNullKeys>
+std::unique_ptr<RowContainer> HashTable<ignoreNullKeys>::newRowContainer()
+    const {
+  std::vector<TypePtr> keys;
+  keys.reserve(hashers_.size());
+  for (const auto& hasher : hashers_) {
+    keys.push_back(hasher->type());
+  }
+
+  std::vector<TypePtr> dependentTypes;
+  const auto& columnTypes = rows_->columnTypes();
+  dependentTypes.reserve(columnTypes.size() - hashers_.size());
+  for (auto i = hashers_.size(); i < columnTypes.size(); ++i) {
+    dependentTypes.push_back(columnTypes[i]);
+  }
+
+  return std::make_unique<RowContainer>(
+      keys,
+      !ignoreNullKeys,
+      std::vector<Accumulator>{},
+      dependentTypes,
+      allowDuplicates_,
+      isJoinBuild_,
+      rows_->probedFlagOffset() != 0,
+      /*hasCountFlag=*/false,
+      // Radix rebuild may materialize a replacement row container for an
+      // existing normalized-key join table. Preserve normalized-key storage so
+      // the subsequent rebuild can continue to use that mode safely.
+      hashMode_ == HashMode::kNormalizedKey,
+      /*useListRowIndex=*/false,
+      pool_);
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::refreshColumnHasNulls() {
+  columnHasNulls_.clear();
+  const auto& columnTypes = rows_->columnTypes();
+  columnHasNulls_.reserve(columnTypes.size());
+  for (auto i = 0; i < columnTypes.size(); ++i) {
+    columnHasNulls_.push_back(rows_->columnHasNulls(i));
+  }
+}
+
+template <bool ignoreNullKeys>
+bool HashTable<ignoreNullKeys>::canBuildRadixPartitions(
+    uint8_t numRadixBits) const {
+  if (numRadixBits == 0 || table_ == nullptr || !isJoinBuild_ ||
+      !otherTables_.empty()) {
+    return false;
+  }
+
+  if (hashMode_ != HashMode::kHash &&
+      hashMode_ != HashMode::kNormalizedKey) {
+    return false;
+  }
+
+  const auto bucketBits = __builtin_ctzll(kBucketSize);
+  const auto maxRadixBits = sizeBits_ - bucketBits;
+  return numRadixBits <= maxRadixBits;
+}
+
+template <bool ignoreNullKeys>
+uint32_t HashTable<ignoreNullKeys>::getRadixPartition(uint64_t hash) const {
+  VELOX_CHECK_GT(radixPartitionBits_, 0);
+  // Radix partitioning is derived from the highest bits of the bucket-aligned
+  // table offset so each partition maps to one contiguous address range.
+  return bucketOffset(hash) >> (sizeBits_ - radixPartitionBits_);
+}
+
+template <bool ignoreNullKeys>
+void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
+  VELOX_CHECK(
+      canBuildRadixPartitions(numRadixBits),
+      "Unsupported radix build configuration: hashMode={}, numRadixBits={}, "
+      "hasTable={}, isJoinBuild={}, otherTables={}",
+      modeString(hashMode_),
+      numRadixBits,
+      table_ != nullptr,
+      isJoinBuild_,
+      otherTables_.size());
+
+  radixPartitionBits_ = numRadixBits;
+  isRadixPartitioned_ = false;
+  const auto numPartitions = 1U << radixPartitionBits_;
+  raw_vector<vector_size_t> partitionStarts(pool_);
+  partitionStarts.resize(numPartitions + 1);
+  std::fill(partitionStarts.begin(), partitionStarts.end(), 0);
+  if (numDistinct_ == 0) {
+    isRadixPartitioned_ = true;
+    return;
+  }
+
+  raw_vector<char*> rows(pool_);
+  rows.resize(numDistinct_);
+  raw_vector<uint64_t> hashes(pool_);
+  hashes.resize(numDistinct_);
+  raw_vector<uint64_t> batchHashes(pool_);
+  batchHashes.resize(kHashBatchSize);
+
+  RowContainerIterator iterator;
+  vector_size_t rowIndex = 0;
+  while (
+      auto numRows =
+          rows_->listRows(&iterator, kHashBatchSize, rows.data() + rowIndex)) {
+    // Radix ordering must use the same hash basis as the current lookup mode.
+    // For normalized-key tables this is the mixed normalized key, not a fresh
+    // row-value hash.
+    VELOX_CHECK(
+        hashRows(
+            folly::Range<char**>(rows.data() + rowIndex, numRows),
+            false,
+            batchHashes),
+        "Failed to hash build rows for radix partitioning");
+    std::copy_n(batchHashes.data(), numRows, hashes.data() + rowIndex);
+    rowIndex += numRows;
+  }
+  VELOX_CHECK_EQ(rowIndex, numDistinct_);
+
+  for (auto i = 0; i < numDistinct_; ++i) {
+    ++partitionStarts[getRadixPartition(hashes[i]) + 1];
+  }
+  for (auto i = 1; i < partitionStarts.size(); ++i) {
+    partitionStarts[i] += partitionStarts[i - 1];
+  }
+
+  raw_vector<vector_size_t> partitionOffsets(pool_);
+  partitionOffsets.resize(numPartitions);
+  for (auto i = 0; i < numPartitions; ++i) {
+    partitionOffsets[i] = partitionStarts[i];
+  }
+
+  raw_vector<char*> partitionedRows(pool_);
+  partitionedRows.resize(numDistinct_);
+  for (auto i = 0; i < numDistinct_; ++i) {
+    const auto partition = getRadixPartition(hashes[i]);
+    partitionedRows[partitionOffsets[partition]++] = rows[i];
+  }
+
+  auto newRows = newRowContainer();
+  auto oldRows = std::move(rows_);
+  auto serializedRows = std::dynamic_pointer_cast<FlatVector<StringView>>(
+      BaseVector::create(VARBINARY(), kHashBatchSize, pool_));
+  VELOX_CHECK_NOT_NULL(serializedRows);
+
+  // RowContainer is append-oriented, so radix ordering is implemented by
+  // materializing rows into a new container in partition order.
+  for (vector_size_t offset = 0; offset < numDistinct_;
+       offset += kHashBatchSize) {
+    const auto numRows =
+        std::min<vector_size_t>(kHashBatchSize, numDistinct_ - offset);
+    serializedRows->resize(numRows);
+    oldRows->extractSerializedRows(
+        folly::Range<char**>(partitionedRows.data() + offset, numRows),
+        serializedRows);
+    for (auto i = 0; i < numRows; ++i) {
+      auto* newRow = newRows->newRow();
+      newRows->storeSerializedRow(*serializedRows, i, newRow);
+      if (nextOffset_) {
+        nextRow(newRow) = nullptr;
+      }
+    }
+  }
+
+  rows_ = std::move(newRows);
+  nextOffset_ = rows_->nextOffset();
+  refreshColumnHasNulls();
+
+  if (table_ != nullptr) {
+    rows_->pool()->freeContiguous(tableAllocation_);
+    table_ = nullptr;
+    capacity_ = 0;
+    sizeMask_ = 0;
+    bucketOffsetMask_ = 0;
+    numBuckets_ = 0;
+    sizeBits_ = 0;
+  }
+  numDistinct_ = rows_->numRows();
+  numTombstones_ = 0;
+
+  if (numDistinct_ > 0) {
+    checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);
+  }
+  isRadixPartitioned_ = true;
 }
 
 template <bool ignoreNullKeys>
@@ -1519,6 +1707,7 @@ template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::rehash(
     bool initNormalizedKeys,
     int8_t spillInputStartPartitionBit) {
+  isRadixPartitioned_ = false;
   ++numRehashes_;
   if (canApplyParallelJoinBuild()) {
     parallelJoinBuild();
@@ -1579,6 +1768,7 @@ void HashTable<ignoreNullKeys>::setHashMode(
     int32_t numNew,
     int8_t spillInputStartPartitionBit) {
   VELOX_CHECK_NE(hashMode_, HashMode::kHash);
+  isRadixPartitioned_ = false;
   TestValue::adjust("facebook::velox::exec::HashTable::setHashMode", &mode);
   if (mode == HashMode::kArray) {
     const auto bytes = capacity_ * tableSlotSize();
@@ -1971,6 +2161,8 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
     bool dropDuplicates,
     folly::Executor* executor) {
   buildExecutor_ = executor;
+  radixPartitionBits_ = 0;
+  isRadixPartitioned_ = false;
   if (dropDuplicates) {
     if (table_ != nullptr) {
       // Reset table_ and capacity_ to trigger rehash.
@@ -1994,6 +2186,7 @@ void HashTable<ignoreNullKeys>::prepareJoinTable(
   // is necessary because, when extracting results, 'rows' may contain row
   // pointers from multiple containers. We need to ensure the correctness of
   // the 'columnHasNulls' flags.
+  columnHasNulls_.clear();
   for (int i = 0; i < rows_->columnTypes().size(); ++i) {
     columnHasNulls_.emplace_back(rows_->columnHasNulls(i));
     for (auto& other : otherTables_) {

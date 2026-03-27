@@ -15,6 +15,7 @@
  */
 
 #include "velox/exec/HashTable.h"
+#include "velox/exec/RadixPartitioner.h"
 #include "folly/experimental/EventCount.h"
 #include "velox/common/base/SelectivityInfo.h"
 #include "velox/common/base/tests/GTestUtils.h"
@@ -69,6 +70,13 @@ class HashTableTestHelper {
   void setHashMode(BaseHashTable::HashMode mode, int32_t numNew) {
     table_->setHashMode(
         mode, numNew, BaseHashTable::kNoSpillInputStartPartitionBit);
+  }
+
+  bool hashRows(
+      folly::Range<char**> rows,
+      bool initNormalizedKeys,
+      raw_vector<uint64_t>& hashes) {
+    return table_->hashRows(rows, initNormalizedKeys, hashes);
   }
 
  private:
@@ -870,6 +878,196 @@ TEST_P(HashTableTest, regularHashingTableSize) {
     auto type = ROW({"k1", "k2"}, {BIGINT(), BIGINT()});
     checkTableSize(BaseHashTable::HashMode::kNormalizedKey, type);
   }
+}
+
+namespace {
+
+void assertRowsClusteredByRadixPartition(
+    HashTableTestHelper<true>& testHelper,
+    BaseHashTable* table,
+    memory::MemoryPool* pool) {
+  auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
+  ASSERT_NE(concreteTable, nullptr);
+  constexpr auto kHashBatchSize = 1024;
+  raw_vector<char*> buildRows(pool);
+  buildRows.resize(table->rows()->numRows());
+  raw_vector<uint64_t> hashes(pool);
+  hashes.resize(table->rows()->numRows());
+
+  RowContainerIterator iterator;
+  vector_size_t numRows = 0;
+  while (auto numListed = table->rows()->listRows(
+             &iterator, kHashBatchSize, buildRows.data() + numRows)) {
+    raw_vector<uint64_t> batchHashes(pool);
+    batchHashes.resize(kHashBatchSize);
+    ASSERT_TRUE(testHelper.hashRows(
+        folly::Range<char**>(buildRows.data() + numRows, numListed),
+        false,
+        batchHashes));
+    std::copy_n(batchHashes.data(), numListed, hashes.data() + numRows);
+    numRows += numListed;
+  }
+
+  uint32_t previousPartition = 0;
+  for (auto i = 0; i < numRows; ++i) {
+    const auto partition = concreteTable->getRadixPartition(hashes[i]);
+    if (i > 0) {
+      ASSERT_LE(previousPartition, partition);
+    }
+    previousPartition = partition;
+  }
+}
+
+void assertProbeRowsClusteredByRadixPartition(
+    BaseHashTable* table,
+    const RowVectorPtr& probeBatch,
+    memory::MemoryPool* pool,
+    bool requireAllPartitionsNonEmpty = true) {
+  auto* concreteTable = dynamic_cast<HashTable<true>*>(table);
+  ASSERT_NE(concreteTable, nullptr);
+  auto partitioner = RadixPartitioner::createBuffered(*table, 1, 1, pool);
+  partitioner->addInput(probeBatch);
+  partitioner->noMoreInput();
+
+  std::vector<vector_size_t> partitionCounts(4, 0);
+  vector_size_t totalRows = 0;
+  while (auto output = partitioner->getOutput()) {
+    HashLookup lookup(table->hashers(), pool);
+    SelectivityVector rows(output->size());
+    table->prepareForJoinProbe(lookup, output, rows, true);
+
+    ASSERT_FALSE(lookup.rows.empty());
+    const auto partition =
+        concreteTable->getRadixPartition(lookup.hashes[lookup.rows[0]]);
+    ++partitionCounts[partition];
+    totalRows += output->size();
+    for (auto row : lookup.rows) {
+      ASSERT_EQ(partition, concreteTable->getRadixPartition(lookup.hashes[row]));
+    }
+  }
+  ASSERT_EQ(totalRows, probeBatch->size());
+  if (requireAllPartitionsNonEmpty) {
+    for (auto count : partitionCounts) {
+      ASSERT_GT(count, 0);
+    }
+  }
+}
+
+} // namespace
+
+TEST_P(HashTableTest, buildRadixPartitionsFromHash) {
+  auto type = ROW({BIGINT()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      false,
+      1'000,
+      pool());
+
+  std::vector<RowVectorPtr> batches;
+  constexpr auto kNumRows = 1 << 12;
+  makeRows(kNumRows, 1, 0, type, batches);
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+  table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
+
+  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  ASSERT_FALSE(table->isRadixPartitioned());
+  table->buildRadixPartitions(2);
+
+  ASSERT_EQ(table->radixPartitionBits(), 2);
+  ASSERT_TRUE(table->isRadixPartitioned());
+  ASSERT_EQ(table->rows()->numRows(), kNumRows);
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+
+  auto testHelper = HashTableTestHelper<true>::create(table.get());
+  assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(table.get(), batches[0], pool());
+}
+
+TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
+  auto type = ROW({"k0", "k1"}, {BIGINT(), VARCHAR()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(VARCHAR(), 1));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      false,
+      1'000,
+      pool());
+
+  std::vector<std::string> keys;
+  keys.reserve(8'192);
+  for (auto row = 0; row < 8'192; ++row) {
+    keys.push_back(fmt::format("s{}", row));
+  }
+  RowVectorPtr buildBatch = makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>(8'192, [](auto row) { return row; }),
+      makeFlatVector<std::string>(keys),
+  });
+  std::vector<RowVectorPtr> batches{buildBatch};
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
+  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+
+  table->buildRadixPartitions(2);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
+  ASSERT_TRUE(table->isRadixPartitioned());
+
+  auto testHelper = HashTableTestHelper<true>::create(table.get());
+  assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(
+      table.get(), buildBatch, pool(), false);
+}
+
+TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
+  auto type = ROW({"k0"}, {BIGINT()});
+  std::vector<std::unique_ptr<VectorHasher>> keyHashers;
+  keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
+  auto table = HashTable<true>::createForJoin(
+      std::move(keyHashers),
+      std::vector<TypePtr>{},
+      true,
+      false,
+      false,
+      1'000,
+      pool());
+
+  RowVectorPtr buildBatch = makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>(8'192, [](auto row) { return row % 256; }),
+  });
+  std::vector<RowVectorPtr> batches{buildBatch};
+  copyVectorsToTable(batches, 0, table.get());
+  table->prepareJoinTable(
+      {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
+  ASSERT_FALSE(table->canBuildRadixPartitions(2));
+
+  table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+
+  table->buildRadixPartitions(2);
+
+  ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kHash);
+  ASSERT_TRUE(table->isRadixPartitioned());
+
+  auto testHelper = HashTableTestHelper<true>::create(table.get());
+  assertRowsClusteredByRadixPartition(testHelper, table.get(), pool());
+  assertProbeRowsClusteredByRadixPartition(table.get(), buildBatch, pool());
 }
 
 TEST_P(HashTableTest, listJoinResultsSize) {
