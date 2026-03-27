@@ -612,8 +612,8 @@ class QueryConfig {
   /// Multiplier used to derive the per-partition buffered probe rows from the
   /// build-side row count. The effective limit is the minimum of this value
   /// multiplied by build rows and kRadixJoinMaxBufferedRowsPerPartition.
-  static constexpr const char* kRadixJoinBufferFactor =
-      "radix_join_buffer_factor";
+  static constexpr const char* kRadixJoinMaxBufferedRowsMultiplier =
+      "radix_join_max_buffered_rows_multiplier";
 
   /// If set to true, then during execution of tasks, the output vectors of
   /// every operator are validated for consistency. This is an expensive check
@@ -1478,8 +1478,8 @@ class QueryConfig {
     return rows;
   }
 
-  uint32_t radixJoinBufferFactor() const {
-    return get<uint32_t>(kRadixJoinBufferFactor, 10);
+  uint32_t radixJoinMaxBufferedRowsMultiplier() const {
+    return get<uint32_t>(kRadixJoinMaxBufferedRowsMultiplier, 10);
   }
 
   bool validateOutputFromOperators() const {

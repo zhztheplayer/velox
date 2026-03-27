@@ -472,7 +472,8 @@ void HashProbe::asyncWaitForHashTable() {
     const auto bufferedRowsFromFactor =
         std::max<vector_size_t>(
             1,
-            static_cast<vector_size_t>(queryConfig.radixJoinBufferFactor()) *
+            static_cast<vector_size_t>(
+                queryConfig.radixJoinMaxBufferedRowsMultiplier()) *
                 buildRows / numRadixPartitions);
     const auto numMaxBufferedRows = std::min(
         queryConfig.radixJoinMaxBufferedRowsPerPartition(),
