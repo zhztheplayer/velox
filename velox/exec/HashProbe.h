@@ -338,9 +338,9 @@ class HashProbe : public Operator {
   /// Decode join key inputs and populate 'nonNullInputRows_'.
   void decodeAndDetectNonNullKeys();
 
-  void prepareInputForProbe();
+  void maybeLoadRadixPartitionedInput();
 
-  bool maybeLoadRadixPartitionedInput();
+  void addInputInternal(RowVectorPtr input);
 
   // Invoked when there is no more input from either upstream task or spill
   // input. If there is remaining spilled data, then the last finished probe
