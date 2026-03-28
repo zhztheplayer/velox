@@ -62,6 +62,8 @@ void HashBuild::setReusableHashTable(
   auto reusableHashTable =
       std::reinterpret_pointer_cast<exec::BaseHashTable>(opaqueHashTable);
 
+  buildRadixPartitions(*reusableHashTable, false);
+
   joinBridge_->setHashTable(
       std::move(reusableHashTable), {}, joinNode_->joinHasNullKeys(), nullptr);
   reuseHashTable_ = true;
@@ -935,55 +937,9 @@ bool HashBuild::finishHashBuild() {
         allowParallelJoinBuild ? operatorCtx_->task()->queryCtx()->executor()
                                : nullptr);
   }
-  // The first radix-build iteration only supports the simple in-memory
-  // single-table case. Spilled input and merged peer tables are excluded.
-  const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
-  const auto radixPartitionBits = queryConfig.radixJoinBits();
-  const auto estimatedTableBytes =
-      table_->estimateHashTableSize(table_->numDistinct()) +
-      table_->rows()->allocatedBytes();
-  const bool radixDisabledByMinTableBytes =
-      radixPartitionBits > 0 &&
-      estimatedTableBytes < queryConfig.radixJoinMinTableBytes();
-  const bool radixDisabledByMaxTableBytes =
-      radixPartitionBits > 0 &&
-      estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
-  bool radixEnabled{false};
-  CpuWallTiming radixTiming;
-  if (!isInputFromSpill() && spillPartitions.empty() && !allowParallelJoinBuild &&
-      radixPartitionBits > 0 &&
-      estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
-      estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
-    if (table_->canBuildRadixPartitions(radixPartitionBits)) {
-      TestValue::adjust(
-          "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
-      {
-        CpuWallTimer cpuWallTimer{radixTiming};
-        table_->buildRadixPartitions(radixPartitionBits);
-      }
-      radixEnabled = true;
-      TestValue::adjust(
-          "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
-    }
-  }
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixBits), RuntimeCounter(radixPartitionBits));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixEstimatedTableBytes),
-      RuntimeCounter(estimatedTableBytes));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixDisabledByMinTableBytes),
-      RuntimeCounter(radixDisabledByMinTableBytes));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixDisabledByMaxTableBytes),
-      RuntimeCounter(radixDisabledByMaxTableBytes));
-  if (radixEnabled) {
-    stats_.wlock()->addRuntimeStat(
-        std::string(HashBuild::kRadixBuildWallNanos),
-        RuntimeCounter(radixTiming.wallNanos, RuntimeCounter::Unit::kNanos));
-  }
+  
+  buildRadixPartitions(*table_, !spillPartitions.empty() || allowParallelJoinBuild);
+
   stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kBuildWallNanos),
       RuntimeCounter(timing.wallNanos, RuntimeCounter::Unit::kNanos));
@@ -1067,6 +1023,57 @@ void HashBuild::ensureTableFits(uint64_t numRows) {
                << pool()->name()
                << ", usage: " << succinctBytes(pool()->usedBytes())
                << ", reservation: " << succinctBytes(pool()->reservedBytes());
+}
+
+void HashBuild::buildRadixPartitions(BaseHashTable& table, bool dryRun) {
+  // The first radix-build iteration only supports the simple in-memory
+  // single-table case. Spilled input and merged peer tables are excluded.
+  const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
+  const auto radixPartitionBits = queryConfig.radixJoinBits();
+  const auto estimatedTableBytes =
+      table.estimateHashTableSize(table.numDistinct()) +
+      table.rows()->allocatedBytes();
+  const bool radixDisabledByMinTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes < queryConfig.radixJoinMinTableBytes();
+  const bool radixDisabledByMaxTableBytes =
+      radixPartitionBits > 0 &&
+      estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
+  bool radixEnabled{false};
+  CpuWallTiming radixTiming;
+  if (!dryRun && !isInputFromSpill() && radixPartitionBits > 0 &&
+      estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
+      estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
+    if (table.canBuildRadixPartitions(radixPartitionBits)) {
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
+      {
+        CpuWallTimer cpuWallTimer{radixTiming};
+        table.buildRadixPartitions(radixPartitionBits);
+      }
+      radixEnabled = true;
+      TestValue::adjust(
+          "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
+    }
+  }
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixBits), RuntimeCounter(radixPartitionBits));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEstimatedTableBytes),
+      RuntimeCounter(estimatedTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMinTableBytes),
+      RuntimeCounter(radixDisabledByMinTableBytes));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixDisabledByMaxTableBytes),
+      RuntimeCounter(radixDisabledByMaxTableBytes));
+  if (radixEnabled) {
+    stats_.wlock()->addRuntimeStat(
+        std::string(HashBuild::kRadixBuildWallNanos),
+        RuntimeCounter(radixTiming.wallNanos, RuntimeCounter::Unit::kNanos));
+  }
 }
 
 void HashBuild::postHashBuildProcess() {

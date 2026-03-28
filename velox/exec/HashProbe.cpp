@@ -468,9 +468,9 @@ void HashProbe::asyncWaitForHashTable() {
 
   VELOX_CHECK_NOT_NULL(table_);
 
-  const bool spillActive = hashBuildResult->restoredPartitionId.has_value() ||
+  const bool buildResultHasSpill = hashBuildResult->restoredPartitionId.has_value() ||
       !hashBuildResult->spillPartitionIds.empty();
-  if (table_->isRadixPartitioned() && !spillActive) {
+  if (table_->isRadixPartitioned() && !buildResultHasSpill) {
     // Keep radix-partitioned probe buffering while the current build round
     // has not entered spill or restore processing.
     const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();

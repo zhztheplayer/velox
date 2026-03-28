@@ -156,6 +156,11 @@ class HashBuild final : public Operator {
   // merged from all the other drivers.
   bool finishHashBuild();
 
+  // Applies radix reordering to 'table' when the current build configuration
+  // supports it. No-op for spilled input, merged parallel build, disabled radix
+  // config, or unsupported table modes/shapes.
+  void buildRadixPartitions(BaseHashTable& table, bool dryRun);
+
   // Invoked after the hash table has been built. It waits for any spill data to
   // process after the probe side has finished processing the previously built
   // hash table. If disk spilling is not enabled or there is no more spill data,
