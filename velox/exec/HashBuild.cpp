@@ -62,7 +62,9 @@ void HashBuild::setReusableHashTable(
   auto reusableHashTable =
       std::reinterpret_pointer_cast<exec::BaseHashTable>(opaqueHashTable);
 
-  buildRadixPartitions(*reusableHashTable, false);
+  // Reused hash tables may already be visible to other drivers. Treat an
+  // existing radix layout as enabled and do not rebuild it again here.
+  buildRadixPartitions(*reusableHashTable, true);
 
   joinBridge_->setHashTable(
       std::move(reusableHashTable), {}, joinNode_->joinHasNullKeys(), nullptr);
@@ -1041,27 +1043,29 @@ void HashBuild::buildRadixPartitions(BaseHashTable& table, bool dryRun) {
       estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
   bool radixEnabled{false};
   CpuWallTiming radixTiming;
-  if (table.isRadixPartitioned()) {
-    // Reused hash tables may already be visible to other drivers. Treat an
-    // existing radix layout as enabled and do not rebuild it again here.
-    radixEnabled = true;
-  }
-  if (!dryRun && !isInputFromSpill() && radixPartitionBits > 0 &&
-      !table.isRadixPartitioned() &&
-      estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
-      estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
-    if (table.canBuildRadixPartitions(radixPartitionBits)) {
-      TestValue::adjust(
-          "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
-      {
-        CpuWallTimer cpuWallTimer{radixTiming};
-        table.buildRadixPartitions(radixPartitionBits);
-      }
+  if (dryRun) {
+    if (table.isRadixPartitioned()) {
       radixEnabled = true;
-      TestValue::adjust(
-          "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
+    }
+  } else {
+    if (!isInputFromSpill() && radixPartitionBits > 0 &&
+        !table.isRadixPartitioned() &&
+        estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
+        estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
+      if (table.canBuildRadixPartitions(radixPartitionBits)) {
+        TestValue::adjust(
+            "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
+        {
+          CpuWallTimer cpuWallTimer{radixTiming};
+          table.buildRadixPartitions(radixPartitionBits);
+        }
+        radixEnabled = true;
+        TestValue::adjust(
+            "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
+      }
     }
   }
+
   stats_.wlock()->addRuntimeStat(
       std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
   stats_.wlock()->addRuntimeStat(
