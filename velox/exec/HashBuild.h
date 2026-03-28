@@ -155,6 +155,12 @@ class HashBuild final : public Operator {
   // config, or unsupported table modes/shapes.
   void buildRadixPartitions(BaseHashTable& table, bool dryRun);
 
+  struct RadixBuildStats {
+    bool enabled{false};
+    uint8_t bits{0};
+    CpuWallTiming timing;
+  };
+
   // Invoked after the hash table has been built. It waits for any spill data to
   // process after the probe side has finished processing the previously built
   // hash table. If disk spilling is not enabled or there is no more spill data,
@@ -417,6 +423,8 @@ class HashBuild final : public Operator {
   // Count the number of hash table input rows for building deduped
   // hash table. It will not be updated after abandonBuildNoDupHash_ is true.
   int64_t numHashInputRows_ = 0;
+
+  RadixBuildStats radixBuildStats_;
 
   bool reuseHashTable_ = false;
 };

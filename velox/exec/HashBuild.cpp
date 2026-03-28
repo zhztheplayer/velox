@@ -943,6 +943,19 @@ bool HashBuild::finishHashBuild() {
   buildRadixPartitions(*table_, !spillPartitions.empty() || allowParallelJoinBuild);
 
   stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixEnabled),
+      RuntimeCounter(radixBuildStats_.enabled));
+  stats_.wlock()->addRuntimeStat(
+      std::string(HashBuild::kRadixBits),
+      RuntimeCounter(radixBuildStats_.bits));
+  if (radixBuildStats_.enabled) {
+    stats_.wlock()->addRuntimeStat(
+        std::string(HashBuild::kRadixBuildWallNanos),
+        RuntimeCounter(
+            radixBuildStats_.timing.wallNanos, RuntimeCounter::Unit::kNanos));
+  }
+
+  stats_.wlock()->addRuntimeStat(
       std::string(BaseHashTable::kBuildWallNanos),
       RuntimeCounter(timing.wallNanos, RuntimeCounter::Unit::kNanos));
 
@@ -1032,11 +1045,11 @@ void HashBuild::buildRadixPartitions(BaseHashTable& table, bool dryRun) {
   // single-table case. Spilled input and merged peer tables are excluded.
   const auto& queryConfig = operatorCtx_->driverCtx()->queryConfig();
   const auto radixPartitionBits = queryConfig.radixJoinBits();
-  bool radixEnabled{false};
-  CpuWallTiming radixTiming;
+  radixBuildStats_ = {};
+  radixBuildStats_.bits = radixPartitionBits;
   if (dryRun) {
     if (table.isRadixPartitioned()) {
-      radixEnabled = true;
+      radixBuildStats_.enabled = true;
     }
   } else {
     if (!isInputFromSpill()) {
@@ -1047,24 +1060,14 @@ void HashBuild::buildRadixPartitions(BaseHashTable& table, bool dryRun) {
         TestValue::adjust(
             "facebook::velox::exec::HashBuild::beforeRadixBuild", table_.get());
         {
-          CpuWallTimer cpuWallTimer{radixTiming};
+          CpuWallTimer cpuWallTimer{radixBuildStats_.timing};
           table.buildRadixPartitions(radixPartitionBits);
         }
-        radixEnabled = true;
+        radixBuildStats_.enabled = true;
         TestValue::adjust(
             "facebook::velox::exec::HashBuild::afterRadixBuild", table_.get());
       }
     }
-  }
-
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixEnabled), RuntimeCounter(radixEnabled));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixBits), RuntimeCounter(radixPartitionBits));
-  if (radixEnabled) {
-    stats_.wlock()->addRuntimeStat(
-        std::string(HashBuild::kRadixBuildWallNanos),
-        RuntimeCounter(radixTiming.wallNanos, RuntimeCounter::Unit::kNanos));
   }
 }
 
