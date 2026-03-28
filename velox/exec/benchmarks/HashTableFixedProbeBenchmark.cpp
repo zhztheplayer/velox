@@ -192,7 +192,9 @@ class FixedProbeBenchmark {
         nullptr);
     if (radixEnabled) {
       table_->buildRadixPartitions(params_.numRadixBits);
-      auto numMaxBufferedRows = params_.buildSize * 10;
+      const auto numRadixPartitions = int64_t{1} << params_.numRadixBits;
+      auto numMaxBufferedRows =
+          std::max<int64_t>(1, params_.buildSize * 10 / numRadixPartitions);
       probePartitioner_ = RadixPartitioner::createBuffered(
           table_,
           table_->hashers(),
