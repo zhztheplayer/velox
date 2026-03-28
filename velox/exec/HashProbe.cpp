@@ -782,6 +782,11 @@ void HashProbe::maybeLoadRadixPartitionedInput() {
 
 void HashProbe::addInput(RowVectorPtr input) {
   if (radixPartitioner_ != nullptr && !spillActive()) {
+    // Buffered radix batches can outlive the current LazyVector reader state.
+    // Materialize the probe input before buffering so later batch merging
+    // doesn't try to load lazy children after the reader has advanced.
+    input = std::dynamic_pointer_cast<RowVector>(
+        BaseVector::loadedVectorShared(input));
     const auto numInput = input->size();
     CpuWallTiming radixTiming;
     {
