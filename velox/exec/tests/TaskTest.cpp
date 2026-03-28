@@ -3629,4 +3629,113 @@ DEBUG_ONLY_TEST_F(TaskTest, blockedWaitTimeOnAbort) {
       << "Operator should have recorded blocked time despite task abort";
 }
 
+class TestConstructorStatsNode : public core::PlanNode {
+ public:
+  TestConstructorStatsNode(const core::PlanNodeId& id, core::PlanNodePtr source)
+      : PlanNode(id), sources_{std::move(source)} {}
+
+  const RowTypePtr& outputType() const override {
+    return sources_[0]->outputType();
+  }
+
+  const std::vector<core::PlanNodePtr>& sources() const override {
+    return sources_;
+  }
+
+  std::string_view name() const override {
+    return "constructor stats node";
+  }
+
+ private:
+  void addDetails(std::stringstream& /*stream*/) const override {}
+
+  std::vector<core::PlanNodePtr> sources_;
+};
+
+class TestConstructorStatsOperator : public exec::Operator {
+ public:
+  static constexpr std::string_view kConstructorStat = "constructorStat";
+
+  TestConstructorStatsOperator(
+      int32_t operatorId,
+      exec::DriverCtx* driverCtx,
+      std::shared_ptr<const TestConstructorStatsNode> node)
+      : Operator(
+            driverCtx,
+            node->outputType(),
+            operatorId,
+            node->id(),
+            "ConstructorStats") {
+    addRuntimeStat(std::string(kConstructorStat), RuntimeCounter(7));
+  }
+
+  bool needsInput() const override {
+    return input_ == nullptr && !noMoreInput_;
+  }
+
+  void addInput(RowVectorPtr input) override {
+    input_ = std::move(input);
+  }
+
+  RowVectorPtr getOutput() override {
+    return std::exchange(input_, nullptr);
+  }
+
+  exec::BlockingReason isBlocked(ContinueFuture* /*unused*/) override {
+    return exec::BlockingReason::kNotBlocked;
+  }
+
+  bool isFinished() override {
+    return noMoreInput_ && input_ == nullptr;
+  }
+
+ private:
+  RowVectorPtr input_;
+};
+
+class TestConstructorStatsTranslator
+    : public exec::Operator::PlanNodeTranslator {
+  std::unique_ptr<exec::Operator> toOperator(
+      exec::DriverCtx* ctx,
+      int32_t id,
+      const core::PlanNodePtr& node) override {
+    if (auto castedNode =
+            std::dynamic_pointer_cast<const TestConstructorStatsNode>(node)) {
+      return std::make_unique<TestConstructorStatsOperator>(id, ctx, castedNode);
+    }
+    return nullptr;
+  }
+};
+
+TEST_F(TaskTest, constructorRuntimeStatsVisibleInTaskStats) {
+  exec::Operator::registerOperator(
+      std::make_unique<TestConstructorStatsTranslator>());
+
+  auto data = makeRowVector({
+      makeFlatVector<int64_t>(32, [](auto row) { return row; }),
+  });
+  auto plan =
+      PlanBuilder()
+          .values(data)
+          .addNode([&](std::string id, core::PlanNodePtr input) mutable {
+            return std::make_shared<TestConstructorStatsNode>(id, input);
+          })
+          .planFragment();
+
+  auto [task, results] = executeSerial(plan);
+  ASSERT_EQ(results.size(), 1);
+
+  const auto taskStats = task->taskStats();
+  const auto& operatorStats = taskStats.pipelineStats[0].operatorStats;
+  ASSERT_EQ(operatorStats.size(), 2);
+  const auto& customOperatorStats = operatorStats[1];
+  const auto& constructorStat =
+      customOperatorStats.runtimeStats.at(
+          std::string(TestConstructorStatsOperator::kConstructorStat));
+  ASSERT_EQ(constructorStat.sum, 7);
+  ASSERT_EQ(constructorStat.count, 1);
+  ASSERT_EQ(constructorStat.min, 7);
+  ASSERT_EQ(constructorStat.max, 7);
+}
+
 } // namespace facebook::velox::exec::test
