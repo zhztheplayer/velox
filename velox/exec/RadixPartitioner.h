@@ -14,12 +14,7 @@ class RadixPartitioner {
 
   static std::unique_ptr<RadixPartitioner> createBuffered(
       std::shared_ptr<BaseHashTable> table,
-      vector_size_t numMaxBufferedRows,
-      vector_size_t minOutputBatchSize,
-      memory::MemoryPool* pool);
-
-  static std::unique_ptr<RadixPartitioner> createBuffered(
-      BaseHashTable& table,
+      const std::vector<std::unique_ptr<VectorHasher>>& hashers,
       vector_size_t numMaxBufferedRows,
       vector_size_t minOutputBatchSize,
       memory::MemoryPool* pool);

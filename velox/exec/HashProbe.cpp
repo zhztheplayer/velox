@@ -496,6 +496,7 @@ void HashProbe::asyncWaitForHashTable() {
     radixMinOutputBatchSize_ = minOutputBatchSize;
     radixPartitioner_ = RadixPartitioner::createBuffered(
         table_,
+        lookup_->hashers,
         radixNumMaxBufferedRows_,
         minOutputBatchSize,
         pool());

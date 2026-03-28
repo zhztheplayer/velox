@@ -47,6 +47,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
  public:
   BufferedRadixPartitioner(
       std::shared_ptr<BaseHashTable> table,
+      const std::vector<std::unique_ptr<VectorHasher>>& hashers,
       vector_size_t numMaxBufferedRows,
       vector_size_t minOutputBatchSize,
       memory::MemoryPool* pool)
@@ -54,7 +55,7 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
         numMaxBufferedRows_(numMaxBufferedRows),
         minOutputBatchSize_(minOutputBatchSize),
         pool_(pool),
-        lookup_(std::make_unique<HashLookup>(table_->hashers(), pool)),
+        lookup_(std::make_unique<HashLookup>(hashers, pool)),
         partitionRows_(1u << table_->radixPartitionBits()),
         bufferedRowsPerPartition_(1u << table_->radixPartitionBits(), 0),
         partitionQueues_(1u << table_->radixPartitionBits()),
@@ -228,23 +229,12 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
 
 std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
     std::shared_ptr<BaseHashTable> table,
+    const std::vector<std::unique_ptr<VectorHasher>>& hashers,
     vector_size_t numMaxBufferedRows,
     vector_size_t minOutputBatchSize,
     memory::MemoryPool* pool) {
   return std::make_unique<BufferedRadixPartitioner>(
-      std::move(table), numMaxBufferedRows, minOutputBatchSize, pool);
-}
-
-std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
-    BaseHashTable& table,
-    vector_size_t numMaxBufferedRows,
-    vector_size_t minOutputBatchSize,
-    memory::MemoryPool* pool) {
-  return createBuffered(
-      std::shared_ptr<BaseHashTable>(&table, [](BaseHashTable*) {}),
-      numMaxBufferedRows,
-      minOutputBatchSize,
-      pool);
+      std::move(table), hashers, numMaxBufferedRows, minOutputBatchSize, pool);
 }
 
 } // namespace facebook::velox::exec

@@ -28,7 +28,7 @@ class RadixPartitionerTest : public testing::Test,
     memory::MemoryManager::testingSetInstance(memory::MemoryManager::Options{});
   }
 
-  std::unique_ptr<BaseHashTable> makeRadixTable() {
+  std::shared_ptr<BaseHashTable> makeRadixTable() {
     std::vector<std::unique_ptr<VectorHasher>> keyHashers;
     keyHashers.emplace_back(std::make_unique<VectorHasher>(BIGINT(), 0));
     auto table = HashTable<true>::createForJoin(
@@ -47,7 +47,7 @@ class RadixPartitionerTest : public testing::Test,
     table->prepareJoinTable(
         {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
     table->buildRadixPartitions(2);
-    return table;
+    return std::shared_ptr<BaseHashTable>(std::move(table));
   }
 
   void copyToTable(const RowVectorPtr& batch, BaseHashTable* table) {
@@ -106,7 +106,8 @@ class RadixPartitionerTest : public testing::Test,
 
 TEST_F(RadixPartitionerTest, wrapped) {
   auto table = makeRadixTable();
-  auto partitioner = RadixPartitioner::createBuffered(*table, 1, 1, pool());
+  auto partitioner = RadixPartitioner::createBuffered(
+      table, table->hashers(), 1, 1, pool());
 
   auto first = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(128, [](auto row) {
@@ -124,8 +125,8 @@ TEST_F(RadixPartitionerTest, wrapped) {
 
 TEST_F(RadixPartitionerTest, wrappedMinBatchSize) {
   auto table = makeRadixTable();
-  auto partitioner =
-      RadixPartitioner::createBuffered(*table, 1, 100, pool());
+  auto partitioner = RadixPartitioner::createBuffered(
+      table, table->hashers(), 1, 100, pool());
 
   auto input = makeRowVector(
       std::vector<VectorPtr>{makeFlatVector<int64_t>(64, [](auto row) {
