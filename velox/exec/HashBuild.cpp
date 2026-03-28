@@ -1041,7 +1041,13 @@ void HashBuild::buildRadixPartitions(BaseHashTable& table, bool dryRun) {
       estimatedTableBytes > queryConfig.radixJoinMaxTableBytes();
   bool radixEnabled{false};
   CpuWallTiming radixTiming;
+  if (table.isRadixPartitioned()) {
+    // Reused hash tables may already be visible to other drivers. Treat an
+    // existing radix layout as enabled and do not rebuild it again here.
+    radixEnabled = true;
+  }
   if (!dryRun && !isInputFromSpill() && radixPartitionBits > 0 &&
+      !table.isRadixPartitioned() &&
       estimatedTableBytes >= queryConfig.radixJoinMinTableBytes() &&
       estimatedTableBytes <= queryConfig.radixJoinMaxTableBytes()) {
     if (table.canBuildRadixPartitions(radixPartitionBits)) {
