@@ -773,7 +773,6 @@ void HashProbe::maybeLoadRadixPartitionedInput() {
     }
     return;
   }
-  radixOutputRows_ += input_->size();
   ++radixOutputVectors_;
   TestValue::adjust(
       "facebook::velox::exec::HashProbe::beforeProbeRadixBatch", this);
@@ -787,14 +786,13 @@ void HashProbe::addInput(RowVectorPtr input) {
     // doesn't try to load lazy children after the reader has advanced.
     input = std::dynamic_pointer_cast<RowVector>(
         BaseVector::loadedVectorShared(input));
-    const auto numInput = input->size();
     CpuWallTiming radixTiming;
     {
       CpuWallTimer cpuWallTimer{radixTiming};
       radixPartitioner_->addInput(std::move(input));
     }
     radixPrepareInputWallNanos_ += radixTiming.wallNanos;
-    radixInputRows_ += numInput;
+    ++radixInputVectors_;
     return;
   }
   addInputInternal(input);
@@ -1964,11 +1962,8 @@ void HashProbe::addRadixRuntimeStats() {
           radixPrepareInputWallNanos_,
           RuntimeCounter::Unit::kNanos));
   addRuntimeStat(
-      std::string(HashProbe::kRadixInputRows),
-      RuntimeCounter(radixInputRows_));
-  addRuntimeStat(
-      std::string(HashProbe::kRadixOutputRows),
-      RuntimeCounter(radixOutputRows_));
+      std::string(HashProbe::kRadixInputVectors),
+      RuntimeCounter(radixInputVectors_));
   addRuntimeStat(
       std::string(HashProbe::kRadixOutputVectors),
       RuntimeCounter(radixOutputVectors_));
