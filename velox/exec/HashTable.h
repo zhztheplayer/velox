@@ -373,7 +373,10 @@ class BaseHashTable {
   /// not freed which can be used for flushing a partial group by, for example.
   virtual void clear(bool freeTable) = 0;
 
-  virtual bool canBuildRadixPartitions(uint8_t numRadixBits) const = 0;
+  virtual bool canBuildRadixPartitions(
+      uint8_t numRadixBits,
+      uint64_t minTableBytes,
+      uint64_t maxTableBytes) const = 0;
 
   virtual void buildRadixPartitions(uint8_t numRadixBits) = 0;
 
@@ -721,7 +724,10 @@ class HashTable : public BaseHashTable {
       bool dropDuplicates = false,
       folly::Executor* executor = nullptr) override;
 
-  bool canBuildRadixPartitions(uint8_t numRadixBits) const override;
+  bool canBuildRadixPartitions(
+      uint8_t numRadixBits,
+      uint64_t minTableBytes,
+      uint64_t maxTableBytes) const override;
 
   void buildRadixPartitions(uint8_t numRadixBits) override;
 

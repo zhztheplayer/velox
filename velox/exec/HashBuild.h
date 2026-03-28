@@ -65,12 +65,6 @@ class HashBuild final : public Operator {
       "abandonBuildNoDupHash";
   static constexpr std::string_view kRadixEnabled = "radixEnabled";
   static constexpr std::string_view kRadixBits = "radixBits";
-  static constexpr std::string_view kRadixEstimatedTableBytes =
-      "radixEstimatedTableBytes";
-  static constexpr std::string_view kRadixDisabledByMinTableBytes =
-      "radixDisabledByMinTableBytes";
-  static constexpr std::string_view kRadixDisabledByMaxTableBytes =
-      "radixDisabledByMaxTableBytes";
   static constexpr std::string_view kRadixBuildWallNanos =
       "radixBuildWallNanos";
 

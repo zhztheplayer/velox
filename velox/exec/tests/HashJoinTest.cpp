@@ -3193,7 +3193,13 @@ TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
           "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
       .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
         auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
         const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            0);
         ASSERT_EQ(
             probeStats.count(std::string(HashProbe::kRadixInputRows)), 0);
         ASSERT_EQ(
@@ -3287,30 +3293,22 @@ TEST_P(HashJoinTest, radixJoinDisabledByMinTableBytes) {
           "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
       .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
         auto opStats = toOperatorStats(task->taskStats());
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
         const auto& buildStats = opStats.at("HashBuild").runtimeStats;
 
         ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMinTableBytes))
-                .sum,
-            1);
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
         ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMaxTableBytes))
-                .sum,
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
             0);
         ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(std::string(HashProbe::kRadixInputRows)),
+            probeStats.count(std::string(HashProbe::kRadixInputRows)),
             0);
         ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(std::string(HashProbe::kRadixOutputRows)),
+            probeStats.count(std::string(HashProbe::kRadixOutputRows)),
             0);
         ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(
-                    std::string(HashProbe::kRadixOutputVectors)),
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
             0);
       })
       .run();
@@ -3397,30 +3395,22 @@ TEST_P(HashJoinTest, radixJoinDisabledByMaxTableBytes) {
           "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
       .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
         auto opStats = toOperatorStats(task->taskStats());
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
         const auto& buildStats = opStats.at("HashBuild").runtimeStats;
 
         ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMinTableBytes))
-                .sum,
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
             0);
         ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMaxTableBytes))
-                .sum,
-            1);
-        ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(std::string(HashProbe::kRadixInputRows)),
+            probeStats.count(std::string(HashProbe::kRadixInputRows)),
             0);
         ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(std::string(HashProbe::kRadixOutputRows)),
+            probeStats.count(std::string(HashProbe::kRadixOutputRows)),
             0);
         ASSERT_EQ(
-            opStats.at("HashProbe")
-                .runtimeStats.count(
-                    std::string(HashProbe::kRadixOutputVectors)),
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
             0);
       })
       .run();
@@ -3504,10 +3494,6 @@ TEST_P(HashJoinTest, radixJoinStatsEnabled) {
         ASSERT_EQ(
             buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
         ASSERT_EQ(buildStats.at(std::string(HashBuild::kRadixBits)).sum, 4);
-        ASSERT_GT(
-            buildStats.at(std::string(HashBuild::kRadixEstimatedTableBytes))
-                .sum,
-            0);
         ASSERT_GT(
             buildStats.at(std::string(HashBuild::kRadixBuildWallNanos)).sum, 0);
 
@@ -3736,10 +3722,16 @@ TEST_P(HashJoinTest, radixJoinDrainsWhenProbeSpillStarts) {
           "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
       .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
         auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
         const auto& probeStats = opStats.at("HashProbe").runtimeStats;
         ASSERT_TRUE(radixBuildTriggered);
         ASSERT_TRUE(radixProbeTriggered);
         ASSERT_TRUE(spillStartedAfterRadix);
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
         ASSERT_GT(opStats.at("HashProbe").spilledBytes, 0);
         ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixInputRows)).sum, 0);
@@ -3825,16 +3817,6 @@ TEST_P(HashJoinTest, radixJoinStatsDisabled) {
         ASSERT_EQ(buildStats.at(std::string(HashBuild::kRadixBits)).sum, 0);
         ASSERT_EQ(
             probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            0);
-        ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMinTableBytes))
-                .sum,
-            0);
-        ASSERT_EQ(
-            buildStats
-                .at(std::string(HashBuild::kRadixDisabledByMaxTableBytes))
-                .sum,
             0);
         ASSERT_EQ(
             probeStats.count(

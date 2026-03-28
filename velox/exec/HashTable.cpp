@@ -817,9 +817,18 @@ void HashTable<ignoreNullKeys>::refreshColumnHasNulls() {
 
 template <bool ignoreNullKeys>
 bool HashTable<ignoreNullKeys>::canBuildRadixPartitions(
-    uint8_t numRadixBits) const {
+    uint8_t numRadixBits,
+    uint64_t minTableBytes,
+    uint64_t maxTableBytes) const {
   if (numRadixBits == 0 || table_ == nullptr || !isJoinBuild_ ||
       !otherTables_.empty()) {
+    return false;
+  }
+
+  const auto estimatedTableBytes =
+      estimateHashTableSize(numDistinct_) + rows_->allocatedBytes();
+  if (estimatedTableBytes < minTableBytes ||
+      estimatedTableBytes > maxTableBytes) {
     return false;
   }
 
@@ -857,7 +866,8 @@ uint32_t HashTable<ignoreNullKeys>::getRadixPartition(uint64_t hash) const {
 template <bool ignoreNullKeys>
 void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
   VELOX_CHECK(
-      canBuildRadixPartitions(numRadixBits),
+      canBuildRadixPartitions(
+          numRadixBits, 0, std::numeric_limits<uint64_t>::max()),
       "Unsupported radix build configuration: hashMode={}, numRadixBits={}, "
       "hasTable={}, isJoinBuild={}, otherTables={}",
       modeString(hashMode_),

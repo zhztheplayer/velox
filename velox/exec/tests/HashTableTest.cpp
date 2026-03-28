@@ -974,7 +974,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromHash) {
       {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
   table->forceGenericHashMode(BaseHashTable::kNoSpillInputStartPartitionBit);
 
-  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  ASSERT_TRUE(table->canBuildRadixPartitions(2, 0, std::numeric_limits<uint64_t>::max()));
   ASSERT_FALSE(table->isRadixPartitioned());
   table->buildRadixPartitions(2);
 
@@ -1017,7 +1017,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromNormalizedKey) {
       {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
 
   ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kNormalizedKey);
-  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  ASSERT_TRUE(table->canBuildRadixPartitions(2, 0, std::numeric_limits<uint64_t>::max()));
 
   table->buildRadixPartitions(2);
 
@@ -1051,7 +1051,7 @@ TEST_P(HashTableTest, buildRadixPartitionsFromArray) {
       {}, BaseHashTable::kNoSpillInputStartPartitionBit, 1'000'000);
 
   ASSERT_EQ(table->hashMode(), BaseHashTable::HashMode::kArray);
-  ASSERT_TRUE(table->canBuildRadixPartitions(2));
+  ASSERT_TRUE(table->canBuildRadixPartitions(2, 0, std::numeric_limits<uint64_t>::max()));
 
   table->buildRadixPartitions(2);
 
