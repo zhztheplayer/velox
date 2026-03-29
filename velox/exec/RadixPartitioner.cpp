@@ -225,6 +225,47 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
   bool noMoreInput_{false};
 };
 
+class EagerPassThroughRadixPartitioner final : public RadixPartitioner {
+ public:
+  EagerPassThroughRadixPartitioner() = default;
+
+  void addInput(RowVectorPtr input) override {
+    VELOX_CHECK_NOT_NULL(input);
+    if (input->size() == 0) {
+      return;
+    }
+    bufferedRows_ += input->size();
+    queue_.push_back(std::move(input));
+  }
+
+  RowVectorPtr getOutput() override {
+    if (queue_.empty()) {
+      return nullptr;
+    }
+    auto output = std::move(queue_.front());
+    queue_.pop_front();
+    bufferedRows_ -= output->size();
+    common::testutil::TestValue::adjust(
+        "facebook::velox::exec::RadixPartitioner::collect", this);
+    return output;
+  }
+
+  void noMoreInput() override {
+  }
+
+  bool hasReadyOutput() const override {
+    return !queue_.empty();
+  }
+
+  bool hasBufferedData() const override {
+    return bufferedRows_ > 0;
+  }
+
+ private:
+  std::deque<RowVectorPtr> queue_;
+  vector_size_t bufferedRows_{0};
+};
+
 } // namespace
 
 std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
@@ -235,6 +276,10 @@ std::unique_ptr<RadixPartitioner> RadixPartitioner::createBuffered(
     memory::MemoryPool* pool) {
   return std::make_unique<BufferedRadixPartitioner>(
       std::move(table), hashers, numMaxBufferedRows, minOutputBatchSize, pool);
+}
+
+std::unique_ptr<RadixPartitioner> RadixPartitioner::createEagerPassThrough() {
+  return std::make_unique<EagerPassThroughRadixPartitioner>();
 }
 
 } // namespace facebook::velox::exec

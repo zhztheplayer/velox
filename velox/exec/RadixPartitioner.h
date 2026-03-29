@@ -19,6 +19,8 @@ class RadixPartitioner {
       vector_size_t minOutputBatchSize,
       memory::MemoryPool* pool);
 
+  static std::unique_ptr<RadixPartitioner> createEagerPassThrough();
+
   virtual void addInput(RowVectorPtr input) = 0;
 
   virtual RowVectorPtr getOutput() = 0;
