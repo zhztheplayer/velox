@@ -228,43 +228,38 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
 
 class EagerPassThroughRadixPartitioner final : public RadixPartitioner {
  public:
-  EagerPassThroughRadixPartitioner() = default;
-
   void addInput(RowVectorPtr input) override {
     VELOX_CHECK_NOT_NULL(input);
     if (input->size() == 0) {
       return;
     }
-    bufferedRows_ += input->size();
-    queue_.push_back(std::move(input));
+    inputs_.push_back(std::move(input));
   }
 
   RowVectorPtr getOutput() override {
-    if (queue_.empty()) {
+    if (inputs_.empty()) {
       return nullptr;
     }
-    auto output = std::move(queue_.front());
-    queue_.pop_front();
-    bufferedRows_ -= output->size();
-    common::testutil::TestValue::adjust(
-        "facebook::velox::exec::RadixPartitioner::collect", this);
+    auto output = std::move(inputs_.front());
+    inputs_.pop_front();
     return output;
   }
 
   void noMoreInput() override {
+    noMoreInput_ = true;
   }
 
   bool hasReadyOutput() const override {
-    return !queue_.empty();
+    return !inputs_.empty();
   }
 
   bool hasBufferedData() const override {
-    return bufferedRows_ > 0;
+    return !inputs_.empty();
   }
 
  private:
-  std::deque<RowVectorPtr> queue_;
-  vector_size_t bufferedRows_{0};
+  std::deque<RowVectorPtr> inputs_;
+  bool noMoreInput_{false};
 };
 
 } // namespace

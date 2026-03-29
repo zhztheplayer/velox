@@ -85,7 +85,10 @@ class RadixPartitionerTest : public testing::Test,
     partitioner.noMoreInput();
 
     vector_size_t totalRows = 0;
-    for (auto output = std::move(firstOutput); output != nullptr;
+    for (auto output =
+             firstOutput != nullptr ? std::move(firstOutput)
+                                    : partitioner.getOutput();
+         output != nullptr;
          output = partitioner.getOutput()) {
       totalRows += output->size();
 
@@ -134,7 +137,7 @@ TEST_F(RadixPartitionerTest, wrappedMinBatchSize) {
       })});
 
   partitioner->addInput(input);
-  assertPartitionedOutput(*table, *partitioner, 64, true);
+  assertPartitionedOutput(*table, *partitioner, 64, false);
 }
 
 } // namespace

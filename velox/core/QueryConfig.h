@@ -615,11 +615,6 @@ class QueryConfig {
   static constexpr const char* kRadixJoinMaxBufferedRowsMultiplier =
       "radix_join_max_buffered_rows_multiplier";
 
-  /// If true, use a pass-through radix partitioner that preserves eager probe
-  /// input loading but skips repartitioning. This is intended for testing.
-  static constexpr const char* kRadixJoinUseEagerPassThroughPartitioner =
-      "debug.radix_join_use_eager_pass_through_partitioner";
-
   /// If set to true, then during execution of tasks, the output vectors of
   /// every operator are validated for consistency. This is an expensive check
   /// so should only be used for debugging. It can help debug issues where
@@ -1485,10 +1480,6 @@ class QueryConfig {
 
   uint32_t radixJoinMaxBufferedRowsMultiplier() const {
     return get<uint32_t>(kRadixJoinMaxBufferedRowsMultiplier, 10);
-  }
-
-  bool radixJoinUseEagerPassThroughPartitioner() const {
-    return get<bool>(kRadixJoinUseEagerPassThroughPartitioner, false);
   }
 
   bool validateOutputFromOperators() const {

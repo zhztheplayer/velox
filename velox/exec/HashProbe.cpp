@@ -494,16 +494,12 @@ void HashProbe::asyncWaitForHashTable() {
                 : queryConfig.radixJoinMinOutputBatchRows());
     radixNumMaxBufferedRows_ = std::max<vector_size_t>(1, numMaxBufferedRows);
     radixMinOutputBatchSize_ = minOutputBatchSize;
-    if (queryConfig.radixJoinUseEagerPassThroughPartitioner()) {
-      radixPartitioner_ = RadixPartitioner::createEagerPassThrough();
-    } else {
-      radixPartitioner_ = RadixPartitioner::createBuffered(
-          table_,
-          lookup_->hashers,
-          radixNumMaxBufferedRows_,
-          minOutputBatchSize,
-          pool());
-    }
+    radixPartitioner_ = RadixPartitioner::createBuffered(
+        table_,
+        lookup_->hashers,
+        radixNumMaxBufferedRows_,
+        minOutputBatchSize,
+        pool());
     radixPartitionerEverEnabled_ = true;
   } else {
     radixNumMaxBufferedRows_ = 0;
