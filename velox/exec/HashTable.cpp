@@ -1633,6 +1633,9 @@ FOLLY_ALWAYS_INLINE void HashTable<ignoreNullKeys>::buildFullProbe(
       partitionInfo->addOverflow(inserted);
       return nullptr;
     }
+    if (nextOffset_ > 0) {
+      nextRow(inserted) = nullptr;
+    }
     storeRowPointer(index, hash, inserted);
     return nullptr;
   };
