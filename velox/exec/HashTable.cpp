@@ -793,7 +793,7 @@ std::unique_ptr<RowContainer> HashTable<ignoreNullKeys>::newRowContainer()
       !ignoreNullKeys,
       std::vector<Accumulator>{},
       dependentTypes,
-      allowDuplicates_,
+      rows_->nextOffset() != 0,
       isJoinBuild_,
       rows_->probedFlagOffset() != 0,
       rows_->countOffset() != 0,
