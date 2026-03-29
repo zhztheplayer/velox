@@ -78,7 +78,8 @@ class BufferedRadixPartitioner final : public RadixPartitioner {
       }
       partitionQueues_[partition].push_back(makePartitionVector(input, rows));
       bufferedRowsPerPartition_[partition] += rows.size();
-      if (bufferedRowsPerPartition_[partition] >= numMaxBufferedRows_) {
+      if (bufferedRowsPerPartition_[partition] >=
+          std::max(numMaxBufferedRows_, minOutputBatchSize_)) {
         markReady(partition);
       }
     }
