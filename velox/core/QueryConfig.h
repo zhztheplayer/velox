@@ -1473,13 +1473,13 @@ class QueryConfig {
   }
 
   vector_size_t radixJoinMinOutputBatchRows() const {
-    const auto rows = get<uint32_t>(kRadixJoinMinOutputBatchRows, 0);
+    const auto rows = get<uint32_t>(kRadixJoinMinOutputBatchRows, 1024);
     VELOX_USER_CHECK_LE(rows, std::numeric_limits<vector_size_t>::max());
     return rows;
   }
 
   uint32_t radixJoinMaxBufferedRowsMultiplier() const {
-    return get<uint32_t>(kRadixJoinMaxBufferedRowsMultiplier, 10);
+    return get<uint32_t>(kRadixJoinMaxBufferedRowsMultiplier, 2);
   }
 
   bool validateOutputFromOperators() const {
