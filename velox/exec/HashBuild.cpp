@@ -945,9 +945,6 @@ bool HashBuild::finishHashBuild() {
   stats_.wlock()->addRuntimeStat(
       std::string(HashBuild::kRadixEnabled),
       RuntimeCounter(radixBuildStats_.enabled));
-  stats_.wlock()->addRuntimeStat(
-      std::string(HashBuild::kRadixBits),
-      RuntimeCounter(radixBuildStats_.bits));
   if (radixBuildStats_.enabled) {
     stats_.wlock()->addRuntimeStat(
         std::string(HashBuild::kRadixBuildWallNanos),

@@ -64,7 +64,6 @@ class HashBuild final : public Operator {
   static constexpr std::string_view kAbandonBuildNoDupHash =
       "abandonBuildNoDupHash";
   static constexpr std::string_view kRadixEnabled = "radixEnabled";
-  static constexpr std::string_view kRadixBits = "radixBits";
   static constexpr std::string_view kRadixBuildWallNanos =
       "radixBuildWallNanos";
 

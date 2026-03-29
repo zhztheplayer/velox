@@ -3479,7 +3479,6 @@ TEST_P(HashJoinTest, radixJoinStatsEnabled) {
 
         ASSERT_EQ(
             buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(buildStats.at(std::string(HashBuild::kRadixBits)).sum, 4);
         ASSERT_GT(
             buildStats.at(std::string(HashBuild::kRadixBuildWallNanos)).sum, 0);
 
@@ -3786,7 +3785,6 @@ TEST_P(HashJoinTest, radixJoinStatsDisabled) {
 
         ASSERT_EQ(
             buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
-        ASSERT_EQ(buildStats.at(std::string(HashBuild::kRadixBits)).sum, 0);
         ASSERT_EQ(
             probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
             0);
