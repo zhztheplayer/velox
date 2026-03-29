@@ -74,7 +74,6 @@ class MultiThreadedHashJoinTest : public HashJoinTest {
 TEST_P(MultiThreadedHashJoinTest, bigintArray) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .probeVectors(1600, 5)
@@ -87,7 +86,6 @@ TEST_P(MultiThreadedHashJoinTest, bigintArray) {
 TEST_P(MultiThreadedHashJoinTest, outOfJoinKeyColumnOrder) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .probeType(probeType_)
       .probeKeys({"t_k2"})
@@ -104,7 +102,6 @@ TEST_P(MultiThreadedHashJoinTest, outOfJoinKeyColumnOrder) {
 TEST_P(MultiThreadedHashJoinTest, joinWithCancellation) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .probeVectors(1600, 5)
@@ -123,7 +120,6 @@ TEST_P(MultiThreadedHashJoinTest, testJoinWithSpillenabledCancellation) {
   auto spillDirectory = TempDirectoryPath::create();
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .probeVectors(1600, 5)
@@ -177,7 +173,6 @@ TEST_P(MultiThreadedHashJoinTest, emptyBuild) {
 TEST_P(MultiThreadedHashJoinTest, emptyProbe) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .probeVectors(0, 5)
@@ -215,7 +210,6 @@ TEST_P(MultiThreadedHashJoinTest, emptyProbe) {
 TEST_P(MultiThreadedHashJoinTest, normalizedKey) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT(), VARCHAR()})
       .probeVectors(1600, 5)
@@ -242,7 +236,6 @@ DEBUG_ONLY_TEST_P(MultiThreadedHashJoinTest, parallelJoinBuildCheck) {
       std::function<void(void*)>([&](void*) { isParallelBuild = true; }));
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT(), VARCHAR()})
       .probeVectors(1600, 5)
@@ -305,7 +298,6 @@ TEST_P(MultiThreadedHashJoinTest, allTypes) {
 TEST_P(MultiThreadedHashJoinTest, filter) {
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .probeVectors(1600, 5)
@@ -339,7 +331,6 @@ DEBUG_ONLY_TEST_P(MultiThreadedHashJoinTest, filterSpillOnFirstProbeInput) {
 
   HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
       .numDrivers(numDrivers_)
-      .injectSpill(false)
       .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
       .keyTypes({BIGINT()})
       .numDrivers(1)
@@ -2869,1104 +2860,6 @@ TEST_P(HashJoinTest, duplicateJoinKeys) {
         "SELECT t.c0, u.c0, u.c1 FROM t " + joinTypeSql +
             " u ON t.c0 = u.c0 and t.c0 = u.c1");
   }
-}
-
-TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys0;
-    std::vector<std::string> keys1;
-    std::vector<std::string> keys2;
-    std::vector<std::string> keys3;
-    std::vector<std::string> keys4;
-    std::vector<std::string> keys5;
-    std::vector<std::string> keys6;
-    std::vector<int64_t> values;
-    keys0.reserve(kRowsPerBatch);
-    keys1.reserve(kRowsPerBatch);
-    keys2.reserve(kRowsPerBatch);
-    keys3.reserve(kRowsPerBatch);
-    keys4.reserve(kRowsPerBatch);
-    keys5.reserve(kRowsPerBatch);
-    keys6.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
-      keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
-      keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
-      keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
-      keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
-      keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
-      keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys0),
-        makeFlatVector<std::string>(keys1),
-        makeFlatVector<std::string>(keys2),
-        makeFlatVector<std::string>(keys3),
-        makeFlatVector<std::string>(keys4),
-        makeFlatVector<std::string>(keys5),
-        makeFlatVector<std::string>(keys6),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys0;
-    std::vector<std::string> keys1;
-    std::vector<std::string> keys2;
-    std::vector<std::string> keys3;
-    std::vector<std::string> keys4;
-    std::vector<std::string> keys5;
-    std::vector<std::string> keys6;
-    std::vector<int64_t> values;
-    keys0.reserve(kRowsPerBatch);
-    keys1.reserve(kRowsPerBatch);
-    keys2.reserve(kRowsPerBatch);
-    keys3.reserve(kRowsPerBatch);
-    keys4.reserve(kRowsPerBatch);
-    keys5.reserve(kRowsPerBatch);
-    keys6.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
-        keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
-        keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
-        keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
-        keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
-        keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
-        keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
-      } else {
-        keys0.push_back(fmt::format("right0_{}_{}", batchIndex, row));
-        keys1.push_back(fmt::format("right1_{}_{}", batchIndex, row));
-        keys2.push_back(fmt::format("right2_{}_{}", batchIndex, row));
-        keys3.push_back(fmt::format("right3_{}_{}", batchIndex, row));
-        keys4.push_back(fmt::format("right4_{}_{}", batchIndex, row));
-        keys5.push_back(fmt::format("right5_{}_{}", batchIndex, row));
-        keys6.push_back(fmt::format("right6_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys0),
-        makeFlatVector<std::string>(keys1),
-        makeFlatVector<std::string>(keys2),
-        makeFlatVector<std::string>(keys3),
-        makeFlatVector<std::string>(keys4),
-        makeFlatVector<std::string>(keys5),
-        makeFlatVector<std::string>(keys6),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({
-                      "c0 AS t0",
-                      "c1 AS t1",
-                      "c2 AS t2",
-                      "c3 AS t3",
-                      "c4 AS t4",
-                      "c5 AS t5",
-                      "c6 AS t6",
-                      "c7 AS t7",
-                  })
-                  .hashJoin(
-                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6"},
-                      {"u0", "u1", "u2", "u3", "u4", "u5", "u6"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({
-                              "c0 AS u0",
-                              "c1 AS u1",
-                              "c2 AS u2",
-                              "c3 AS u3",
-                              "c4 AS u4",
-                              "c5 AS u5",
-                              "c6 AS u6",
-                              "c7 AS u7",
-                          })
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "u7"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, u.c7 "
-          "FROM t INNER JOIN u ON t.c0 = u.c0 AND t.c1 = u.c1 AND "
-          "t.c2 = u.c2 AND t.c3 = u.c3 AND t.c4 = u.c4 AND "
-          "t.c5 = u.c5 AND t.c6 = u.c6")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .keyTypes({BIGINT(), VARCHAR()})
-      .probeVectors(1600, 5)
-      .buildVectors(1500, 5)
-      .referenceQuery(
-          "SELECT t_k0, t_k1, t_data, u_k0, u_k1, u_data FROM t, u WHERE t_k0 = u_k0 AND t_k1 = u_k1")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
-  std::vector<RowVectorPtr> probeVectors;
-  std::vector<RowVectorPtr> buildVectors;
-  for (auto batch = 0; batch < 5; ++batch) {
-    probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<int64_t>(1600, [](auto row) { return row % 256; }),
-        makeFlatVector<int64_t>(1600, [batch](auto row) {
-          return batch * 1600 + row;
-        }),
-    }));
-    buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<int64_t>(1500, [](auto row) { return row % 256; }),
-        makeFlatVector<int64_t>(1500, [batch](auto row) {
-          return batch * 1500 + row;
-        }),
-    }));
-  }
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .probeProjections({"c0 AS t0", "c1 AS t1"})
-      .buildProjections({"c0 AS u0", "c1 AS u1"})
-      .probeKeys({"t0"})
-      .buildKeys({"u0"})
-      .joinOutputLayout({"t0", "t1", "u0", "u1"})
-      .probeVectors(std::move(probeVectors))
-      .buildVectors(std::move(buildVectors))
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c0, u.c1 FROM t, u WHERE t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixJoinPreservesEmptyStringVsNull) {
-  std::vector<RowVectorPtr> probeVectors;
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 2, 3, 4}),
-      makeNullableFlatVector<StringView>({"", "alpha", std::nullopt, ""}),
-  }));
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({5, 6, 7, 8}),
-      makeNullableFlatVector<StringView>({"beta", std::nullopt, "", "gamma"}),
-  }));
-
-  std::vector<RowVectorPtr> buildVectors;
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 2, 3, 4}),
-      makeNullableFlatVector<StringView>({"right-a", "", std::nullopt, ""}),
-  }));
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({5, 6, 7, 8}),
-      makeNullableFlatVector<StringView>({"", std::nullopt, "right-g", ""}),
-  }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .probeProjections({"c0 AS t0", "c1 AS t1"})
-      .buildProjections({"c0 AS u0", "c1 AS u1"})
-      .probeKeys({"t0"})
-      .buildKeys({"u0"})
-      .joinOutputLayout({"t0", "t1", "u1"})
-      .probeVectors(std::move(probeVectors))
-      .buildVectors(std::move(buildVectors))
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixLeftSemiJoinSemantics) {
-  std::vector<RowVectorPtr> probeVectors;
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 2, 3, 4}),
-      makeFlatVector<int64_t>({10, 20, 30, 40}),
-  }));
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({5, 6, 7, 8}),
-      makeFlatVector<int64_t>({50, 60, 70, 80}),
-  }));
-
-  std::vector<RowVectorPtr> buildVectors;
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 1, 3, 3}),
-      makeFlatVector<int64_t>({101, 102, 103, 104}),
-  }));
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({6, 6, 8, 8}),
-      makeFlatVector<int64_t>({106, 107, 108, 109}),
-  }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .joinType(core::JoinType::kLeftSemiFilter)
-      .probeProjections({"c0 AS t0", "c1 AS t1"})
-      .buildProjections({"c0 AS u0", "c1 AS u1"})
-      .probeKeys({"t0"})
-      .buildKeys({"u0"})
-      .joinOutputLayout({"t0", "t1"})
-      .probeVectors(std::move(probeVectors))
-      .buildVectors(std::move(buildVectors))
-      .referenceQuery(
-          "SELECT t.c0, t.c1 FROM t WHERE EXISTS "
-          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixAntiJoinSemantics) {
-  std::vector<RowVectorPtr> probeVectors;
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 2, 3, 4}),
-      makeFlatVector<int64_t>({10, 20, 30, 40}),
-  }));
-  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({5, 6, 7, 8}),
-      makeFlatVector<int64_t>({50, 60, 70, 80}),
-  }));
-
-  std::vector<RowVectorPtr> buildVectors;
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({1, 1, 3, 3}),
-      makeFlatVector<int64_t>({101, 102, 103, 104}),
-  }));
-  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
-      makeFlatVector<int64_t>({6, 6, 8, 8}),
-      makeFlatVector<int64_t>({106, 107, 108, 109}),
-  }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .joinType(core::JoinType::kAnti)
-      .probeProjections({"c0 AS t0", "c1 AS t1"})
-      .buildProjections({"c0 AS u0", "c1 AS u1"})
-      .probeKeys({"t0"})
-      .buildKeys({"u0"})
-      .joinOutputLayout({"t0", "t1"})
-      .probeVectors(std::move(probeVectors))
-      .buildVectors(std::move(buildVectors))
-      .referenceQuery(
-          "SELECT t.c0, t.c1 FROM t WHERE NOT EXISTS "
-          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  bool radixBuildTriggered{false};
-  bool radixProbeTriggered{false};
-
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeRadixBuild",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::RadixPartitioner::collect",
-      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixInputVectors)), 0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
-      })
-      .run();
-
-  ASSERT_FALSE(radixBuildTriggered);
-  ASSERT_FALSE(radixProbeTriggered);
-}
-
-TEST_P(HashJoinTest, radixJoinDisabledByMinTableBytes) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  bool radixBuildTriggered{false};
-  bool radixProbeTriggered{false};
-
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeRadixBuild",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::RadixPartitioner::collect",
-      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .maxSpillLevel(0)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(
-          core::QueryConfig::kRadixJoinMinTableBytes,
-          std::to_string(std::numeric_limits<uint64_t>::max()))
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixInputVectors)),
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
-            0);
-      })
-      .run();
-
-  ASSERT_FALSE(radixBuildTriggered);
-  ASSERT_FALSE(radixProbeTriggered);
-}
-
-TEST_P(HashJoinTest, radixJoinDisabledByMaxTableBytes) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  bool radixBuildTriggered{false};
-  bool radixProbeTriggered{false};
-
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeRadixBuild",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::RadixPartitioner::collect",
-      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .maxSpillLevel(0)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxTableBytes, "0")
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixInputVectors)),
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
-            0);
-      })
-      .run();
-
-  ASSERT_FALSE(radixBuildTriggered);
-  ASSERT_FALSE(radixProbeTriggered);
-}
-
-TEST_P(HashJoinTest, radixJoinStatsEnabled) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .maxSpillLevel(0)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_GT(
-            buildStats.at(std::string(HashBuild::kRadixBuildWallNanos)).sum, 0);
-
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixPrepareInputWallNanos))
-                .sum,
-            0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixJoinEnabledWhenSpillConfiguredButInactive) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  bool radixBuildTriggered{false};
-  bool radixProbeTriggered{false};
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeRadixBuild",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::RadixPartitioner::collect",
-      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
-
-  const auto spillDirectory = TempDirectoryPath::create();
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .spillDirectory(spillDirectory->getPath())
-      .config(core::QueryConfig::kSpillEnabled, "true")
-      .config(core::QueryConfig::kJoinSpillEnabled, "true")
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(opStats.at("HashBuild").spilledBytes, 0);
-        ASSERT_EQ(opStats.at("HashProbe").spilledBytes, 0);
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-        ASSERT_TRUE(radixBuildTriggered);
-        ASSERT_TRUE(radixProbeTriggered);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixJoinDrainsWhenProbeSpillStarts) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  bool radixBuildTriggered{false};
-  bool radixProbeTriggered{false};
-  bool spillStartedAfterRadix{false};
-  std::unique_ptr<TestScopedSpillInjection> delayedSpillInjection;
-
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashBuild::beforeRadixBuild",
-      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::RadixPartitioner::collect",
-      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashProbe::beforeProbeRadixBatch",
-      std::function<void(void*)>([&](void*) {
-        if (delayedSpillInjection != nullptr) {
-          return;
-        }
-        delayedSpillInjection = std::make_unique<TestScopedSpillInjection>(
-            100, ".*HashProbe.*", 1);
-      }));
-  SCOPED_TESTVALUE_SET(
-      "facebook::velox::exec::HashProbe::afterSetupInputSpiller",
-      std::function<void(void*)>(
-          [&](void*) { spillStartedAfterRadix = radixProbeTriggered; }));
-
-  const auto spillDirectory = TempDirectoryPath::create();
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .spillDirectory(spillDirectory->getPath())
-      .config(core::QueryConfig::kSpillEnabled, "true")
-      .config(core::QueryConfig::kJoinSpillEnabled, "true")
-      .config(core::QueryConfig::kRadixJoinBits, "4")
-      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
-      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-        ASSERT_TRUE(radixBuildTriggered);
-        ASSERT_TRUE(radixProbeTriggered);
-        ASSERT_TRUE(spillStartedAfterRadix);
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            1);
-        ASSERT_GT(opStats.at("HashProbe").spilledBytes, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
-      })
-      .run();
-}
-
-TEST_P(HashJoinTest, radixJoinStatsDisabled) {
-  constexpr int32_t kNumBatches = 16;
-  constexpr int32_t kRowsPerBatch = 64;
-  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
-    std::vector<std::string> keys;
-    std::vector<int64_t> values;
-    keys.reserve(kRowsPerBatch);
-    values.reserve(kRowsPerBatch);
-    for (auto row = 0; row < kRowsPerBatch; ++row) {
-      if (row % 2 == 0) {
-        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
-      } else {
-        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
-      }
-      values.push_back(batchIndex * kRowsPerBatch + row);
-    }
-    return makeRowVector(std::vector<VectorPtr>{
-        makeFlatVector<std::string>(keys),
-        makeFlatVector<int64_t>(values),
-    });
-  });
-
-  createDuckDbTable("t", leftVectors);
-  createDuckDbTable("u", rightVectors);
-
-  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-  auto plan = PlanBuilder(planNodeIdGenerator)
-                  .values(leftVectors)
-                  .project({"c0 AS t0", "c1 AS t1"})
-                  .hashJoin(
-                      {"t0"},
-                      {"u0"},
-                      PlanBuilder(planNodeIdGenerator)
-                          .values(rightVectors)
-                          .project({"c0 AS u0", "c1 AS u1"})
-                          .planNode(),
-                      "",
-                      {"t0", "t1", "u1"},
-                      core::JoinType::kInner)
-                  .planNode();
-
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(numDrivers_)
-      .injectSpill(false)
-      .maxSpillLevel(0)
-      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
-      .planNode(plan)
-      .referenceQuery(
-          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
-      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
-        auto opStats = toOperatorStats(task->taskStats());
-        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
-        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
-
-        ASSERT_EQ(
-            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
-        ASSERT_EQ(
-            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
-            0);
-        ASSERT_EQ(
-            probeStats.count(
-                std::string(HashProbe::kRadixPrepareInputWallNanos)),
-            0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixInputVectors)), 0);
-        ASSERT_EQ(
-            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
-      })
-      .run();
 }
 
 TEST_P(HashJoinTest, semiProject) {
@@ -10439,6 +9332,1104 @@ DEBUG_ONLY_TEST_P(HashJoinTest, hashJoinSpillFileCreateConfig) {
 
   ASSERT_TRUE(hashJoinConfigVerified.load());
   ASSERT_TRUE(defaultConfigVerified.load());
+}
+
+TEST_P(HashJoinTest, radixBuildOnSerialJoin) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys0;
+    std::vector<std::string> keys1;
+    std::vector<std::string> keys2;
+    std::vector<std::string> keys3;
+    std::vector<std::string> keys4;
+    std::vector<std::string> keys5;
+    std::vector<std::string> keys6;
+    std::vector<int64_t> values;
+    keys0.reserve(kRowsPerBatch);
+    keys1.reserve(kRowsPerBatch);
+    keys2.reserve(kRowsPerBatch);
+    keys3.reserve(kRowsPerBatch);
+    keys4.reserve(kRowsPerBatch);
+    keys5.reserve(kRowsPerBatch);
+    keys6.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
+      keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
+      keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
+      keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
+      keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
+      keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
+      keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys0),
+        makeFlatVector<std::string>(keys1),
+        makeFlatVector<std::string>(keys2),
+        makeFlatVector<std::string>(keys3),
+        makeFlatVector<std::string>(keys4),
+        makeFlatVector<std::string>(keys5),
+        makeFlatVector<std::string>(keys6),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys0;
+    std::vector<std::string> keys1;
+    std::vector<std::string> keys2;
+    std::vector<std::string> keys3;
+    std::vector<std::string> keys4;
+    std::vector<std::string> keys5;
+    std::vector<std::string> keys6;
+    std::vector<int64_t> values;
+    keys0.reserve(kRowsPerBatch);
+    keys1.reserve(kRowsPerBatch);
+    keys2.reserve(kRowsPerBatch);
+    keys3.reserve(kRowsPerBatch);
+    keys4.reserve(kRowsPerBatch);
+    keys5.reserve(kRowsPerBatch);
+    keys6.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys0.push_back(fmt::format("left0_{}_{}", batchIndex, row));
+        keys1.push_back(fmt::format("left1_{}_{}", batchIndex, row));
+        keys2.push_back(fmt::format("left2_{}_{}", batchIndex, row));
+        keys3.push_back(fmt::format("left3_{}_{}", batchIndex, row));
+        keys4.push_back(fmt::format("left4_{}_{}", batchIndex, row));
+        keys5.push_back(fmt::format("left5_{}_{}", batchIndex, row));
+        keys6.push_back(fmt::format("left6_{}_{}", batchIndex, row));
+      } else {
+        keys0.push_back(fmt::format("right0_{}_{}", batchIndex, row));
+        keys1.push_back(fmt::format("right1_{}_{}", batchIndex, row));
+        keys2.push_back(fmt::format("right2_{}_{}", batchIndex, row));
+        keys3.push_back(fmt::format("right3_{}_{}", batchIndex, row));
+        keys4.push_back(fmt::format("right4_{}_{}", batchIndex, row));
+        keys5.push_back(fmt::format("right5_{}_{}", batchIndex, row));
+        keys6.push_back(fmt::format("right6_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys0),
+        makeFlatVector<std::string>(keys1),
+        makeFlatVector<std::string>(keys2),
+        makeFlatVector<std::string>(keys3),
+        makeFlatVector<std::string>(keys4),
+        makeFlatVector<std::string>(keys5),
+        makeFlatVector<std::string>(keys6),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({
+                      "c0 AS t0",
+                      "c1 AS t1",
+                      "c2 AS t2",
+                      "c3 AS t3",
+                      "c4 AS t4",
+                      "c5 AS t5",
+                      "c6 AS t6",
+                      "c7 AS t7",
+                  })
+                  .hashJoin(
+                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6"},
+                      {"u0", "u1", "u2", "u3", "u4", "u5", "u6"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({
+                              "c0 AS u0",
+                              "c1 AS u1",
+                              "c2 AS u2",
+                              "c3 AS u3",
+                              "c4 AS u4",
+                              "c5 AS u5",
+                              "c6 AS u6",
+                              "c7 AS u7",
+                          })
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "u7"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, t.c2, t.c3, t.c4, t.c5, t.c6, t.c7, u.c7 "
+          "FROM t INNER JOIN u ON t.c0 = u.c0 AND t.c1 = u.c1 AND "
+          "t.c2 = u.c2 AND t.c3 = u.c3 AND t.c4 = u.c4 AND "
+          "t.c5 = u.c5 AND t.c6 = u.c6")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixBuildOnSerialNormalizedKeyJoin) {
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .keyTypes({BIGINT(), VARCHAR()})
+      .probeVectors(1600, 5)
+      .buildVectors(1500, 5)
+      .referenceQuery(
+          "SELECT t_k0, t_k1, t_data, u_k0, u_k1, u_data FROM t, u WHERE t_k0 = u_k0 AND t_k1 = u_k1")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
+  std::vector<RowVectorPtr> probeVectors;
+  std::vector<RowVectorPtr> buildVectors;
+  for (auto batch = 0; batch < 5; ++batch) {
+    probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<int64_t>(1600, [](auto row) { return row % 256; }),
+        makeFlatVector<int64_t>(1600, [batch](auto row) {
+          return batch * 1600 + row;
+        }),
+    }));
+    buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<int64_t>(1500, [](auto row) { return row % 256; }),
+        makeFlatVector<int64_t>(1500, [batch](auto row) {
+          return batch * 1500 + row;
+        }),
+    }));
+  }
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1", "u0", "u1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c0, u.c1 FROM t, u WHERE t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixJoinPreservesEmptyStringVsNull) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeNullableFlatVector<StringView>({"", "alpha", std::nullopt, ""}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeNullableFlatVector<StringView>({"beta", std::nullopt, "", "gamma"}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeNullableFlatVector<StringView>({"right-a", "", std::nullopt, ""}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeNullableFlatVector<StringView>({"", std::nullopt, "right-g", ""}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1", "u1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixLeftSemiJoinSemantics) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeFlatVector<int64_t>({10, 20, 30, 40}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeFlatVector<int64_t>({50, 60, 70, 80}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 1, 3, 3}),
+      makeFlatVector<int64_t>({101, 102, 103, 104}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({6, 6, 8, 8}),
+      makeFlatVector<int64_t>({106, 107, 108, 109}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .joinType(core::JoinType::kLeftSemiFilter)
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1 FROM t WHERE EXISTS "
+          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixAntiJoinSemantics) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeFlatVector<int64_t>({10, 20, 30, 40}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeFlatVector<int64_t>({50, 60, 70, 80}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 1, 3, 3}),
+      makeFlatVector<int64_t>({101, 102, 103, 104}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({6, 6, 8, 8}),
+      makeFlatVector<int64_t>({106, 107, 108, 109}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .joinType(core::JoinType::kAnti)
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1 FROM t WHERE NOT EXISTS "
+          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::RadixPartitioner::collect",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixInputVectors)), 0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
+      })
+      .run();
+
+  ASSERT_FALSE(radixBuildTriggered);
+  ASSERT_FALSE(radixProbeTriggered);
+}
+
+TEST_P(HashJoinTest, radixJoinDisabledByMinTableBytes) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::RadixPartitioner::collect",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .maxSpillLevel(0)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(
+          core::QueryConfig::kRadixJoinMinTableBytes,
+          std::to_string(std::numeric_limits<uint64_t>::max()))
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixInputVectors)),
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
+            0);
+      })
+      .run();
+
+  ASSERT_FALSE(radixBuildTriggered);
+  ASSERT_FALSE(radixProbeTriggered);
+}
+
+TEST_P(HashJoinTest, radixJoinDisabledByMaxTableBytes) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::RadixPartitioner::collect",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .maxSpillLevel(0)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxTableBytes, "0")
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixInputVectors)),
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)),
+            0);
+      })
+      .run();
+
+  ASSERT_FALSE(radixBuildTriggered);
+  ASSERT_FALSE(radixProbeTriggered);
+}
+
+TEST_P(HashJoinTest, radixJoinStatsEnabled) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .maxSpillLevel(0)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_GT(
+            buildStats.at(std::string(HashBuild::kRadixBuildWallNanos)).sum, 0);
+
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixPrepareInputWallNanos))
+                .sum,
+            0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixJoinEnabledWhenSpillConfiguredButInactive) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::RadixPartitioner::collect",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+
+  const auto spillDirectory = TempDirectoryPath::create();
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .spillDirectory(spillDirectory->getPath())
+      .config(core::QueryConfig::kSpillEnabled, "true")
+      .config(core::QueryConfig::kJoinSpillEnabled, "true")
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(opStats.at("HashBuild").spilledBytes, 0);
+        ASSERT_EQ(opStats.at("HashProbe").spilledBytes, 0);
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+        ASSERT_TRUE(radixBuildTriggered);
+        ASSERT_TRUE(radixProbeTriggered);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixJoinDrainsWhenProbeSpillStarts) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  bool radixBuildTriggered{false};
+  bool radixProbeTriggered{false};
+  bool spillStartedAfterRadix{false};
+  std::unique_ptr<TestScopedSpillInjection> delayedSpillInjection;
+
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashBuild::beforeRadixBuild",
+      std::function<void(void*)>([&](void*) { radixBuildTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::RadixPartitioner::collect",
+      std::function<void(void*)>([&](void*) { radixProbeTriggered = true; }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashProbe::beforeProbeRadixBatch",
+      std::function<void(void*)>([&](void*) {
+        if (delayedSpillInjection != nullptr) {
+          return;
+        }
+        delayedSpillInjection = std::make_unique<TestScopedSpillInjection>(
+            100, ".*HashProbe.*", 1);
+      }));
+  SCOPED_TESTVALUE_SET(
+      "facebook::velox::exec::HashProbe::afterSetupInputSpiller",
+      std::function<void(void*)>(
+          [&](void*) { spillStartedAfterRadix = radixProbeTriggered; }));
+
+  const auto spillDirectory = TempDirectoryPath::create();
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .spillDirectory(spillDirectory->getPath())
+      .config(core::QueryConfig::kSpillEnabled, "true")
+      .config(core::QueryConfig::kJoinSpillEnabled, "true")
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+        ASSERT_TRUE(radixBuildTriggered);
+        ASSERT_TRUE(radixProbeTriggered);
+        ASSERT_TRUE(spillStartedAfterRadix);
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(opStats.at("HashProbe").spilledBytes, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixJoinStatsDisabled) {
+  constexpr int32_t kNumBatches = 16;
+  constexpr int32_t kRowsPerBatch = 64;
+  auto leftVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  auto rightVectors = makeBatches(kNumBatches, [&](int32_t batchIndex) {
+    std::vector<std::string> keys;
+    std::vector<int64_t> values;
+    keys.reserve(kRowsPerBatch);
+    values.reserve(kRowsPerBatch);
+    for (auto row = 0; row < kRowsPerBatch; ++row) {
+      if (row % 2 == 0) {
+        keys.push_back(fmt::format("left_{}_{}", batchIndex, row));
+      } else {
+        keys.push_back(fmt::format("right_only_{}_{}", batchIndex, row));
+      }
+      values.push_back(batchIndex * kRowsPerBatch + row);
+    }
+    return makeRowVector(std::vector<VectorPtr>{
+        makeFlatVector<std::string>(keys),
+        makeFlatVector<int64_t>(values),
+    });
+  });
+
+  createDuckDbTable("t", leftVectors);
+  createDuckDbTable("u", rightVectors);
+
+  auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
+  auto plan = PlanBuilder(planNodeIdGenerator)
+                  .values(leftVectors)
+                  .project({"c0 AS t0", "c1 AS t1"})
+                  .hashJoin(
+                      {"t0"},
+                      {"u0"},
+                      PlanBuilder(planNodeIdGenerator)
+                          .values(rightVectors)
+                          .project({"c0 AS u0", "c1 AS u1"})
+                          .planNode(),
+                      "",
+                      {"t0", "t1", "u1"},
+                      core::JoinType::kInner)
+                  .planNode();
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .maxSpillLevel(0)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .planNode(plan)
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 0);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            0);
+        ASSERT_EQ(
+            probeStats.count(
+                std::string(HashProbe::kRadixPrepareInputWallNanos)),
+            0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixInputVectors)), 0);
+        ASSERT_EQ(
+            probeStats.count(std::string(HashProbe::kRadixOutputVectors)), 0);
+      })
+      .run();
 }
 
 } // namespace
