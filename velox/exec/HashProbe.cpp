@@ -1160,8 +1160,15 @@ RowVectorPtr HashProbe::getOutput() {
   }
 
   for (;;) {
+    if (isFinished()) {
+      return nullptr;
+    }
+
     if (input_ == nullptr) {
       maybeLoadRadixPartitionedInput();
+      if (isFinished()) {
+        return nullptr;
+      }
     }
 
     auto output = getOutputInternal(/*toSpillOutput=*/false);
@@ -1172,7 +1179,7 @@ RowVectorPtr HashProbe::getOutput() {
     // A ready radix batch can be fully consumed without producing a join
     // output. Keep draining ready radix batches until one yields output or the
     // operator transitions to spill handling.
-    if (input_ == nullptr && radixPartitioner_ != nullptr &&
+    if (isRunning() && input_ == nullptr && radixPartitioner_ != nullptr &&
         radixPartitioner_->hasReadyOutput() && !spillActive()) {
       continue;
     }
