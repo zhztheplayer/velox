@@ -3113,6 +3113,61 @@ TEST_P(HashJoinTest, radixBuildOnSerialArrayJoin) {
       .run();
 }
 
+TEST_P(HashJoinTest, radixJoinPreservesEmptyStringVsNull) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeNullableFlatVector<StringView>({"", "alpha", std::nullopt, ""}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeNullableFlatVector<StringView>({"beta", std::nullopt, "", "gamma"}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeNullableFlatVector<StringView>({"right-a", "", std::nullopt, ""}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeNullableFlatVector<StringView>({"", std::nullopt, "right-g", ""}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1", "u1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1, u.c1 FROM t INNER JOIN u ON t.c0 = u.c0")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
 TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
   constexpr int32_t kNumBatches = 16;
   constexpr int32_t kRowsPerBatch = 64;

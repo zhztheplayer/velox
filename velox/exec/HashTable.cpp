@@ -935,9 +935,10 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
 
   auto newRows = newRowContainer();
   auto oldRows = std::move(rows_);
-  auto serializedRows = std::dynamic_pointer_cast<FlatVector<StringView>>(
-      BaseVector::create(VARBINARY(), kHashBatchSize, pool_));
-  VELOX_CHECK_NOT_NULL(serializedRows);
+  std::vector<VectorPtr> columnVectors(oldRows->columnTypes().size());
+  std::vector<DecodedVector> decoded(columnVectors.size());
+  raw_vector<char*> newBatchRows(pool_);
+  newBatchRows.resize(kHashBatchSize);
 
   // RowContainer is append-oriented, so radix ordering is implemented by
   // materializing rows into a new container in partition order.
@@ -945,16 +946,30 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
        offset += kHashBatchSize) {
     const auto numRows =
         std::min<vector_size_t>(kHashBatchSize, numDistinct_ - offset);
-    serializedRows->resize(numRows);
-    oldRows->extractSerializedRows(
-        folly::Range<char**>(partitionedRows.data() + offset, numRows),
-        serializedRows);
+
     for (auto i = 0; i < numRows; ++i) {
-      auto* newRow = newRows->newRow();
-      newRows->storeSerializedRow(*serializedRows, i, newRow);
+      newBatchRows[i] = newRows->newRow();
       if (nextOffset_) {
-        nextRow(newRow) = nullptr;
+        nextRow(newBatchRows[i]) = nullptr;
       }
+    }
+
+    auto sourceRows = folly::Range<char**>(partitionedRows.data() + offset, numRows);
+    for (auto column = 0; column < columnVectors.size(); ++column) {
+      if (columnVectors[column] == nullptr) {
+        columnVectors[column] =
+            BaseVector::create(oldRows->columnTypes()[column], numRows, pool_);
+      } else {
+        columnVectors[column]->resize(numRows);
+      }
+      oldRows->extractColumn(
+          sourceRows.data(), numRows, column, columnVectors[column]);
+      SelectivityVector allRows(numRows);
+      decoded[column].decode(*columnVectors[column], allRows);
+      newRows->store(
+          decoded[column],
+          folly::Range<char**>(newBatchRows.data(), numRows),
+          column);
     }
   }
 
