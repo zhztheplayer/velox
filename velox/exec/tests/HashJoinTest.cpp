@@ -3168,6 +3168,120 @@ TEST_P(HashJoinTest, radixJoinPreservesEmptyStringVsNull) {
       .run();
 }
 
+TEST_P(HashJoinTest, radixLeftSemiJoinSemantics) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeFlatVector<int64_t>({10, 20, 30, 40}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeFlatVector<int64_t>({50, 60, 70, 80}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 1, 3, 3}),
+      makeFlatVector<int64_t>({101, 102, 103, 104}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({6, 6, 8, 8}),
+      makeFlatVector<int64_t>({106, 107, 108, 109}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .joinType(core::JoinType::kLeftSemiFilter)
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1 FROM t WHERE EXISTS "
+          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
+TEST_P(HashJoinTest, radixAntiJoinSemantics) {
+  std::vector<RowVectorPtr> probeVectors;
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 2, 3, 4}),
+      makeFlatVector<int64_t>({10, 20, 30, 40}),
+  }));
+  probeVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({5, 6, 7, 8}),
+      makeFlatVector<int64_t>({50, 60, 70, 80}),
+  }));
+
+  std::vector<RowVectorPtr> buildVectors;
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({1, 1, 3, 3}),
+      makeFlatVector<int64_t>({101, 102, 103, 104}),
+  }));
+  buildVectors.push_back(makeRowVector(std::vector<VectorPtr>{
+      makeFlatVector<int64_t>({6, 6, 8, 8}),
+      makeFlatVector<int64_t>({106, 107, 108, 109}),
+  }));
+
+  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+      .numDrivers(numDrivers_)
+      .injectSpill(false)
+      .parallelizeJoinBuildRows(parallelBuildSideRowsEnabled_)
+      .config(core::QueryConfig::kRadixJoinBits, "4")
+      .config(core::QueryConfig::kRadixJoinMaxBufferedRowsPerPartition, "1")
+      .config(core::QueryConfig::kRadixJoinMinOutputBatchRows, "1")
+      .joinType(core::JoinType::kAnti)
+      .probeProjections({"c0 AS t0", "c1 AS t1"})
+      .buildProjections({"c0 AS u0", "c1 AS u1"})
+      .probeKeys({"t0"})
+      .buildKeys({"u0"})
+      .joinOutputLayout({"t0", "t1"})
+      .probeVectors(std::move(probeVectors))
+      .buildVectors(std::move(buildVectors))
+      .referenceQuery(
+          "SELECT t.c0, t.c1 FROM t WHERE NOT EXISTS "
+          "(SELECT 1 FROM u WHERE t.c0 = u.c0)")
+      .verifier([&](const std::shared_ptr<Task>& task, bool /*unused*/) {
+        auto opStats = toOperatorStats(task->taskStats());
+        const auto& buildStats = opStats.at("HashBuild").runtimeStats;
+        const auto& probeStats = opStats.at("HashProbe").runtimeStats;
+
+        ASSERT_EQ(
+            buildStats.at(std::string(HashBuild::kRadixEnabled)).sum, 1);
+        ASSERT_EQ(
+            probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
+            1);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixInputVectors)).sum, 0);
+        ASSERT_GT(
+            probeStats.at(std::string(HashProbe::kRadixOutputVectors)).sum, 0);
+      })
+      .run();
+}
+
 TEST_P(HashJoinTest, radixJoinDisabledByDefault) {
   constexpr int32_t kNumBatches = 16;
   constexpr int32_t kRowsPerBatch = 64;
