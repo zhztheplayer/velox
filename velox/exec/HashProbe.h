@@ -37,10 +37,6 @@ class HashProbe : public Operator {
       "replacedWithDynamicFilterRows";
   static constexpr std::string_view kRadixPartitionerEnabled =
       "radixPartitionerEnabled";
-  static constexpr std::string_view kRadixMaxBufferedRowsPerPartition =
-      "radixMaxBufferedRowsPerPartition";
-  static constexpr std::string_view kRadixMinOutputBatchRows =
-      "radixMinOutputBatchRows";
   static constexpr std::string_view kRadixPrepareInputWallNanos =
       "radixPrepareInputWallNanos";
   static constexpr std::string_view kRadixInputVectors =

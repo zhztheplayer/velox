@@ -3487,14 +3487,6 @@ TEST_P(HashJoinTest, radixJoinStatsEnabled) {
             probeStats.at(std::string(HashProbe::kRadixPartitionerEnabled)).sum,
             1);
         ASSERT_GT(
-            probeStats
-                .at(std::string(HashProbe::kRadixMaxBufferedRowsPerPartition))
-                .sum,
-            0);
-        ASSERT_GT(
-            probeStats.at(std::string(HashProbe::kRadixMinOutputBatchRows)).sum,
-            0);
-        ASSERT_GT(
             probeStats.at(std::string(HashProbe::kRadixPrepareInputWallNanos))
                 .sum,
             0);

@@ -509,14 +509,6 @@ void HashProbe::asyncWaitForHashTable() {
   addRuntimeStat(
       std::string(HashProbe::kRadixPartitionerEnabled),
       RuntimeCounter(radixPartitioner_ != nullptr));
-  if (radixPartitioner_ != nullptr) {
-    addRuntimeStat(
-        std::string(HashProbe::kRadixMaxBufferedRowsPerPartition),
-        RuntimeCounter(radixNumMaxBufferedRows_));
-    addRuntimeStat(
-        std::string(HashProbe::kRadixMinOutputBatchRows),
-        RuntimeCounter(radixMinOutputBatchSize_));
-  }
 
   maybeSetupSpillInputReader(hashBuildResult->restoredPartitionId);
   maybeSetupInputSpiller(hashBuildResult->spillPartitionIds);
