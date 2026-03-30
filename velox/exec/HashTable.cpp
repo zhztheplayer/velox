@@ -798,9 +798,10 @@ std::unique_ptr<RowContainer> HashTable<ignoreNullKeys>::newRowContainer()
       rows_->probedFlagOffset() != 0,
       rows_->countOffset() != 0,
       // Radix rebuild may materialize a replacement row container for an
-      // existing normalized-key join table. Preserve normalized-key storage so
-      // the subsequent rebuild can continue to use that mode safely.
-      hashMode_ == HashMode::kNormalizedKey,
+      // existing non-hash join table. Preserve normalized-key storage so a
+      // rebuilt array table can still transition to normalized-key mode during
+      // post-radix mode selection.
+      hashMode_ != HashMode::kHash,
       /*useListRowIndex=*/false,
       pool_);
 }
@@ -995,7 +996,6 @@ void HashTable<ignoreNullKeys>::buildRadixPartitions(uint8_t numRadixBits) {
           0,
           BaseHashTable::kNoSpillInputStartPartitionBit,
           disableRangeArrayHash_);
-      VELOX_CHECK_EQ(hashMode_, HashMode::kArray);
     } else {
       checkSize(0, true, BaseHashTable::kNoSpillInputStartPartitionBit);
     }
