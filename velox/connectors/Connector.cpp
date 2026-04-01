@@ -19,9 +19,54 @@
 namespace facebook::velox::connector {
 namespace {
 
-std::unordered_map<std::string, std::shared_ptr<Connector>>& connectors() {
-  static std::unordered_map<std::string, std::shared_ptr<Connector>> connectors;
-  return connectors;
+class ConnectorRegistry {
+ public:
+  using Connectors = std::unordered_map<std::string, std::shared_ptr<Connector>>;
+
+  bool registerConnector(std::shared_ptr<Connector> connector) {
+    std::lock_guard<std::mutex> l(mutex_);
+    const bool ok =
+        connectors_.insert({connector->connectorId(), std::move(connector)}).second;
+    VELOX_CHECK(
+        ok,
+        "Connector with ID '{}' is already registered",
+        connector->connectorId());
+    return true;
+  }
+
+  bool unregisterConnector(const std::string& connectorId) {
+    std::lock_guard<std::mutex> l(mutex_);
+    return connectors_.erase(connectorId) == 1;
+  }
+
+  std::shared_ptr<Connector> getConnector(const std::string& connectorId) const {
+    std::lock_guard<std::mutex> l(mutex_);
+    auto it = connectors_.find(connectorId);
+    VELOX_CHECK(
+        it != connectors_.end(),
+        "Connector with ID '{}' not registered",
+        connectorId);
+    return it->second;
+  }
+
+  bool hasConnector(const std::string& connectorId) const {
+    std::lock_guard<std::mutex> l(mutex_);
+    return connectors_.find(connectorId) != connectors_.end();
+  }
+
+  Connectors getAllConnectors() const {
+    std::lock_guard<std::mutex> l(mutex_);
+    return connectors_;
+  }
+
+ private:
+  mutable std::mutex mutex_;
+  Connectors connectors_;
+};
+
+ConnectorRegistry& connectorRegistry() {
+  static ConnectorRegistry registry;
+  return registry;
 }
 } // namespace
 
@@ -38,35 +83,23 @@ std::string DataSink::Stats::toString() const {
 }
 
 bool registerConnector(std::shared_ptr<Connector> connector) {
-  bool ok = connectors().insert({connector->connectorId(), connector}).second;
-  VELOX_CHECK(
-      ok,
-      "Connector with ID '{}' is already registered",
-      connector->connectorId());
-  return true;
+  return connectorRegistry().registerConnector(std::move(connector));
 }
 
 bool unregisterConnector(const std::string& connectorId) {
-  auto count = connectors().erase(connectorId);
-  return count == 1;
+  return connectorRegistry().unregisterConnector(connectorId);
 }
 
 std::shared_ptr<Connector> getConnector(const std::string& connectorId) {
-  auto it = connectors().find(connectorId);
-  VELOX_CHECK(
-      it != connectors().end(),
-      "Connector with ID '{}' not registered",
-      connectorId);
-  return it->second;
+  return connectorRegistry().getConnector(connectorId);
 }
 
 bool hasConnector(const std::string& connectorId) {
-  return connectors().find(connectorId) != connectors().end();
+  return connectorRegistry().hasConnector(connectorId);
 }
 
-const std::unordered_map<std::string, std::shared_ptr<Connector>>&
-getAllConnectors() {
-  return connectors();
+std::unordered_map<std::string, std::shared_ptr<Connector>> getAllConnectors() {
+  return connectorRegistry().getAllConnectors();
 }
 
 folly::Synchronized<

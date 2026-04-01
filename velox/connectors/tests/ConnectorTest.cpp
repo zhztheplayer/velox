@@ -67,7 +67,7 @@ TEST(ConnectorTest, getAllConnectors) {
             std::unordered_map<std::string, std::string>())));
   }
 
-  const auto& connectors = getAllConnectors();
+  const auto connectors = getAllConnectors();
   EXPECT_EQ(connectors.size(), numConnectors);
   for (int32_t i = 0; i < numConnectors; i++) {
     EXPECT_EQ(connectors.count(fmt::format("connector-{}", i)), 1);
