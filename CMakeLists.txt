@@ -93,6 +93,19 @@ option(ENABLE_ALL_WARNINGS "Enable -Wall and -Wextra compiler warnings." ON)
 option(VELOX_BUILD_SHARED "Build Velox as shared libraries." OFF)
 option(VELOX_BUILD_CMAKE_PACKAGE "Build CMake package for Velox." OFF)
 option(VELOX_ENABLE_LTO "Enable link-time optimization (IPO/LTO) for supported builds." OFF)
+set(
+  VELOX_PGO_MODE
+  "OFF"
+  CACHE STRING
+  "Enable profile-guided optimization: OFF, GENERATE, USE."
+)
+set_property(CACHE VELOX_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
+set(
+  VELOX_PGO_PROFILE_PATH
+  ""
+  CACHE STRING
+  "Profile data path used by VELOX_PGO_MODE. For GCC this is a directory or prefix for -fprofile-generate/-fprofile-use. For Clang this is a .profraw output pattern in GENERATE mode or a .profdata file in USE mode."
+)
 option(VELOX_SKIP_WAVE_BRANCH_KERNEL_TEST "Disable Wave branch kernel test." OFF)
 # While it's possible to build both in one go we currently want to build either
 # static or shared.
@@ -140,6 +153,64 @@ if(VELOX_ENABLE_LTO)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
 
   message(STATUS "VELOX_ENABLE_LTO enabled for ${CMAKE_BUILD_TYPE} builds")
+endif()
+
+if(NOT VELOX_PGO_MODE STREQUAL "OFF")
+  if(NOT VELOX_MONO_LIBRARY)
+    message(FATAL_ERROR "VELOX_PGO_MODE currently requires VELOX_MONO_LIBRARY=ON.")
+  endif()
+
+  if(NOT CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo)$")
+    message(
+      FATAL_ERROR
+      "VELOX_PGO_MODE is currently supported only for Release or RelWithDebInfo builds. "
+      "Current build type: '${CMAKE_BUILD_TYPE}'."
+    )
+  endif()
+
+  if(VELOX_PGO_MODE STREQUAL "USE" AND VELOX_PGO_PROFILE_PATH STREQUAL "")
+    message(FATAL_ERROR "VELOX_PGO_MODE=USE requires VELOX_PGO_PROFILE_PATH.")
+  endif()
+
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(VELOX_PGO_MODE STREQUAL "GENERATE")
+      if(VELOX_PGO_PROFILE_PATH STREQUAL "")
+        add_compile_options(-fprofile-generate)
+        add_link_options(-fprofile-generate)
+      else()
+        add_compile_options(-fprofile-generate=${VELOX_PGO_PROFILE_PATH})
+        add_link_options(-fprofile-generate=${VELOX_PGO_PROFILE_PATH})
+      endif()
+    elseif(VELOX_PGO_MODE STREQUAL "USE")
+      add_compile_options(
+        -fprofile-use=${VELOX_PGO_PROFILE_PATH}
+        -fprofile-correction
+      )
+      add_link_options(-fprofile-use=${VELOX_PGO_PROFILE_PATH})
+    else()
+      message(FATAL_ERROR "Unsupported VELOX_PGO_MODE: ${VELOX_PGO_MODE}")
+    endif()
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    if(VELOX_PGO_MODE STREQUAL "GENERATE")
+      if(VELOX_PGO_PROFILE_PATH STREQUAL "")
+        message(FATAL_ERROR "Clang PGO generation requires VELOX_PGO_PROFILE_PATH, e.g. '/tmp/velox-%p.profraw'.")
+      endif()
+      add_compile_options(-fprofile-instr-generate=${VELOX_PGO_PROFILE_PATH})
+      add_link_options(-fprofile-instr-generate=${VELOX_PGO_PROFILE_PATH})
+    elseif(VELOX_PGO_MODE STREQUAL "USE")
+      add_compile_options(-fprofile-instr-use=${VELOX_PGO_PROFILE_PATH})
+      add_link_options(-fprofile-instr-use=${VELOX_PGO_PROFILE_PATH})
+    else()
+      message(FATAL_ERROR "Unsupported VELOX_PGO_MODE: ${VELOX_PGO_MODE}")
+    endif()
+  else()
+    message(FATAL_ERROR "VELOX_PGO_MODE is not supported for compiler '${CMAKE_CXX_COMPILER_ID}'.")
+  endif()
+
+  message(STATUS "VELOX_PGO_MODE=${VELOX_PGO_MODE}")
+  if(NOT VELOX_PGO_PROFILE_PATH STREQUAL "")
+    message(STATUS "VELOX_PGO_PROFILE_PATH=${VELOX_PGO_PROFILE_PATH}")
+  endif()
 endif()
 
 # option() always creates a BOOL variable so we have to use a normal cache
