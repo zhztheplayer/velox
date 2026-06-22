@@ -15,7 +15,7 @@
  */
 
 #include "velox/functions/sparksql/MightContain.h"
-#include "velox/common/base/BloomFilter.h"
+#include "velox/common/base/SimpleBloomFilter.h"
 #include "velox/core/Expressions.h"
 #include "velox/functions/sparksql/tests/SparkFunctionBaseTest.h"
 
@@ -55,7 +55,7 @@ class MightContainTest : public SparkFunctionBaseTest {
   }
 
   std::string getSerializedBloomFilter(int32_t kSize) {
-    BloomFilter bloomFilter;
+    SimpleBloomFilter bloomFilter;
     bloomFilter.reset(kSize);
     for (auto i = 0; i < kSize; ++i) {
       bloomFilter.insert(folly::hasher<int64_t>()(i));

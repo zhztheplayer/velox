@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/common/base/BloomFilter.h"
+#include "velox/common/base/SimpleBloomFilter.h"
 
 #include <folly/Hash.h>
 #include <folly/Random.h>
@@ -27,7 +27,7 @@ class BloomFilterTest : public ::testing::Test {};
 
 TEST_F(BloomFilterTest, basic) {
   constexpr int32_t kSize = 1024;
-  BloomFilter bloom;
+  SimpleBloomFilter bloom;
   bloom.reset(kSize);
   for (auto i = 0; i < kSize; ++i) {
     bloom.insert(folly::hasher<int32_t>()(i));
@@ -44,7 +44,7 @@ TEST_F(BloomFilterTest, basic) {
 
 TEST_F(BloomFilterTest, serialize) {
   constexpr int32_t kSize = 1024;
-  BloomFilter bloom;
+  SimpleBloomFilter bloom;
   bloom.reset(kSize);
   for (auto i = 0; i < kSize; ++i) {
     bloom.insert(folly::hasher<int32_t>()(i));
@@ -52,7 +52,7 @@ TEST_F(BloomFilterTest, serialize) {
   std::string data;
   data.resize(bloom.serializedSize());
   bloom.serialize(data.data());
-  BloomFilter deserialized;
+  SimpleBloomFilter deserialized;
   deserialized.merge(data.data());
   for (auto i = 0; i < kSize; ++i) {
     EXPECT_TRUE(deserialized.mayContain(folly::hasher<int32_t>()(i)));
@@ -66,7 +66,7 @@ TEST_F(BloomFilterTest, serialize) {
 TEST_F(BloomFilterTest, staticMayContain) {
   constexpr int32_t kSize = 1024;
   std::string serializedBloom;
-  BloomFilter bloom;
+  SimpleBloomFilter bloom;
   bloom.reset(kSize);
   for (auto i = 0; i < kSize; ++i) {
     bloom.insert(folly::hasher<int32_t>()(i));
@@ -76,19 +76,19 @@ TEST_F(BloomFilterTest, staticMayContain) {
   int32_t numFalsePositives = 0;
   for (auto i = 0; i < kSize; ++i) {
     EXPECT_TRUE(
-        BloomFilter<>::mayContain(
+        SimpleBloomFilter<>::mayContain(
             serializedBloom.data(), folly::hasher<int32_t>()(i)));
 
     const uint64_t smallValueHash = folly::hasher<int32_t>()(i + kSize);
     const bool isFalsePositiveForSmallValue =
-        BloomFilter<>::mayContain(serializedBloom.data(), smallValueHash);
+        SimpleBloomFilter<>::mayContain(serializedBloom.data(), smallValueHash);
     EXPECT_EQ(isFalsePositiveForSmallValue, bloom.mayContain(smallValueHash));
     numFalsePositives += isFalsePositiveForSmallValue;
 
     const uint64_t largeValueHash =
         folly::hasher<int32_t>()((i + kSize) * 123451);
     const bool isFalsePositiveForLargeValue =
-        BloomFilter<>::mayContain(serializedBloom.data(), largeValueHash);
+        SimpleBloomFilter<>::mayContain(serializedBloom.data(), largeValueHash);
     EXPECT_EQ(isFalsePositiveForLargeValue, bloom.mayContain(largeValueHash));
     numFalsePositives += isFalsePositiveForLargeValue;
   }
@@ -97,13 +97,13 @@ TEST_F(BloomFilterTest, staticMayContain) {
 
 TEST_F(BloomFilterTest, merge) {
   constexpr int32_t kSize = 10;
-  BloomFilter bloom;
+  SimpleBloomFilter bloom;
   bloom.reset(kSize);
   for (auto i = 0; i < kSize; ++i) {
     bloom.insert(folly::hasher<int32_t>()(i));
   }
 
-  BloomFilter merge;
+  SimpleBloomFilter merge;
   merge.reset(kSize);
   for (auto i = kSize; i < kSize + kSize; i++) {
     merge.insert(folly::hasher<int32_t>()(i));
@@ -132,31 +132,31 @@ TEST_F(BloomFilterTest, corruptMergeSize) {
   int32_t badSize = -1;
   memcpy(&data[1], &badSize, sizeof(badSize));
 
-  BloomFilter bloom;
+  SimpleBloomFilter bloom;
   EXPECT_THROW(bloom.merge(data.data()), VeloxRuntimeError);
 }
 
 TEST_F(BloomFilterTest, optimalNumOfBitsWithFpp) {
-  EXPECT_EQ(BloomFilter<>::optimalNumOfBits(1000, 0.03), 7298);
-  EXPECT_EQ(BloomFilter<>::optimalNumOfBits(1000000, 0.01), 9585058);
-  EXPECT_EQ(BloomFilter<>::optimalNumOfBits(1, 0.5), 1);
-  EXPECT_EQ(BloomFilter<>::optimalNumOfBits(1000, 0.001), 14377);
+  EXPECT_EQ(SimpleBloomFilter<>::optimalNumOfBits(1000, 0.03), 7298);
+  EXPECT_EQ(SimpleBloomFilter<>::optimalNumOfBits(1000000, 0.01), 9585058);
+  EXPECT_EQ(SimpleBloomFilter<>::optimalNumOfBits(1, 0.5), 1);
+  EXPECT_EQ(SimpleBloomFilter<>::optimalNumOfBits(1000, 0.001), 14377);
 }
 
 TEST_F(BloomFilterTest, optimalNumOfBitsWithMaxItems) {
   constexpr int64_t kMaxNumItems = 4'000'000L;
 
   EXPECT_EQ(
-      BloomFilter<>::optimalNumOfBits(kMaxNumItems, kMaxNumItems), 29'193'763);
+      SimpleBloomFilter<>::optimalNumOfBits(kMaxNumItems, kMaxNumItems), 29'193'763);
 
   EXPECT_EQ(
-      BloomFilter<>::optimalNumOfBits(1'000'000L, kMaxNumItems), 10'183'830);
+      SimpleBloomFilter<>::optimalNumOfBits(1'000'000L, kMaxNumItems), 10'183'830);
 
-  EXPECT_EQ(BloomFilter<>::optimalNumOfBits(100L, kMaxNumItems), 2935);
-
-  EXPECT_EQ(
-      BloomFilter<>::optimalNumOfBits(5'000'000L, kMaxNumItems), 36'492'204);
+  EXPECT_EQ(SimpleBloomFilter<>::optimalNumOfBits(100L, kMaxNumItems), 2935);
 
   EXPECT_EQ(
-      BloomFilter<>::optimalNumOfBits(10'000'000L, kMaxNumItems), 72'984'408);
+      SimpleBloomFilter<>::optimalNumOfBits(5'000'000L, kMaxNumItems), 36'492'204);
+
+  EXPECT_EQ(
+      SimpleBloomFilter<>::optimalNumOfBits(10'000'000L, kMaxNumItems), 72'984'408);
 }

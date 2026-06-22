@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "velox/common/base/BloomFilter.h"
+#include "velox/common/base/SimpleBloomFilter.h"
 #include "velox/core/QueryConfig.h"
 #include "velox/functions/Macros.h"
 
@@ -43,7 +43,7 @@ struct BloomFilterMightContainFunction {
   }
 
  private:
-  BloomFilter<Allocator> bloomFilter_;
+  SimpleBloomFilter<Allocator> bloomFilter_;
 };
 
 } // namespace facebook::velox::functions::sparksql

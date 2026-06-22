@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/common/base/BloomFilter.h"
+#include "velox/common/base/SimpleBloomFilter.h"
 #include "velox/common/base/tests/GTestUtils.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
@@ -36,7 +36,7 @@ class BloomFilterAggAggregateTest
   }
 
   VectorPtr getSerializedBloomFilter(int32_t capacity) {
-    BloomFilter bloomFilter;
+    SimpleBloomFilter bloomFilter;
     bloomFilter.reset(capacity);
     for (auto i = 0; i < 9; ++i) {
       bloomFilter.insert(folly::hasher<int64_t>()(i));

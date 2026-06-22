@@ -1299,10 +1299,10 @@ class BigintValuesUsingBloomFilter final : public Filter {
   BigintValuesUsingBloomFilter(int64_t capacity, bool nullAllowed)
       : Filter(true, nullAllowed, FilterKind::kBigintValuesUsingBloomFilter),
         blocks_(numBlocks(capacity)),
-        filter_(blocks_) {}
+        filter_(std::make_unique<SplitBlockBloomFilter>(blocks_)) {}
 
   bool testInt64(int64_t value) const final {
-    return filter_.mayContain(hash(value));
+    return filter_->mayContain(hash(value));
   }
 
   xsimd::batch_bool<int64_t> testValues(xsimd::batch<int64_t> x) const final {
@@ -1338,11 +1338,12 @@ class BigintValuesUsingBloomFilter final : public Filter {
   std::unique_ptr<Filter> mergeWith(const Filter* other) const override;
 
   void insert(int64_t value) {
-    filter_.insert(hash(value));
+    filter_->insert(hash(value));
   }
 
   uint64_t blockIndex(int64_t value) const {
-    return filter_.blockIndex(hash(value));
+    return static_cast<const SplitBlockBloomFilter*>(filter_.get())
+        ->blockIndex(hash(value));
   }
 
   int64_t blocksByteSize() const {
@@ -1363,10 +1364,10 @@ class BigintValuesUsingBloomFilter final : public Filter {
       std::vector<SplitBlockBloomFilter::Block> blocks)
       : Filter(true, nullAllowed, FilterKind::kBigintValuesUsingBloomFilter),
         blocks_(std::move(blocks)),
-        filter_(blocks_) {}
+        filter_(std::make_unique<SplitBlockBloomFilter>(blocks_)) {}
 
   std::vector<SplitBlockBloomFilter::Block> blocks_;
-  SplitBlockBloomFilter filter_;
+  std::unique_ptr<BloomFilter> filter_;
 };
 
 // NOT IN-list filter for integral data types. Implemented as a hash table. Good

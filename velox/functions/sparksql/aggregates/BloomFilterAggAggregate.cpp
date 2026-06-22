@@ -16,7 +16,7 @@
 
 #include "velox/functions/sparksql/aggregates/BloomFilterAggAggregate.h"
 
-#include "velox/common/base/BloomFilter.h"
+#include "velox/common/base/SimpleBloomFilter.h"
 #include "velox/exec/Aggregate.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/functions/sparksql/SparkQueryConfig.h"
@@ -58,7 +58,7 @@ struct BloomFilterAccumulator {
     bloomFilter.insert(folly::hasher<int64_t>()(value));
   }
 
-  BloomFilter<StlAllocator<uint64_t>> bloomFilter;
+  SimpleBloomFilter<StlAllocator<uint64_t>> bloomFilter;
 };
 
 class BloomFilterAggAggregate : public exec::Aggregate {
@@ -227,7 +227,7 @@ class BloomFilterAggAggregate : public exec::Aggregate {
         setConstantArgument("numBits", numBits_, decodedNumBits);
       } else {
         numBits_ =
-            BloomFilter<>::optimalNumOfBits(estimatedNumItems_, maxNumItems_);
+            SimpleBloomFilter<>::optimalNumOfBits(estimatedNumItems_, maxNumItems_);
       }
     } else {
       estimatedNumItems_ = defaultExpectedNumItems_;

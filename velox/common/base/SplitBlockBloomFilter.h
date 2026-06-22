@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "velox/common/base/BloomFilter.h"
 #include "velox/common/base/SimdUtil.h"
 
 #include <cstdint>
@@ -31,7 +32,7 @@ namespace facebook::velox {
 ///
 /// A detailed explanation about how the data structure works can be found here:
 /// https://parquet.apache.org/docs/file-format/bloomfilter/
-class SplitBlockBloomFilter {
+class SplitBlockBloomFilter : public BloomFilter {
  public:
   /// A block is basically a SIMD register.  Made public so user can calculate
   /// the size needed for memory allocation; otherwise it's implementation
@@ -68,7 +69,7 @@ class SplitBlockBloomFilter {
 
   /// Insert a hash into the bloom filter.  The function used to generate this
   /// hash should be avalanching.
-  void insert(uint64_t hash) {
+  void insert(uint64_t hash) override {
     auto mask = makeMask(hash);
     auto* block = blocks_[blockIndex(hash)].data;
     (xsimd::load_aligned(block) | mask).store_aligned(block);
@@ -77,7 +78,7 @@ class SplitBlockBloomFilter {
   /// Check whether a hash has been inserted before.  Could return true when it
   /// has not been inserted.  Never return false when the hash has been
   /// inserted.
-  bool mayContain(uint64_t hash) const {
+  bool mayContain(uint64_t hash) const override {
     auto mask = makeMask(hash);
     auto block = xsimd::load_aligned(blocks_[blockIndex(hash)].data);
 #if XSIMD_WITH_AVX

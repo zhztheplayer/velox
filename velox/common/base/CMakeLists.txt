@@ -48,6 +48,7 @@ velox_add_library(
   BitSet.h
   BitUtil.h
   BloomFilter.h
+  SimpleBloomFilter.h
   CheckedArithmetic.h
   ClassName.h
   CoalesceIo.h
