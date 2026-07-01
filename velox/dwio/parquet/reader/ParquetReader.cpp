@@ -1499,9 +1499,11 @@ class ParquetRowReader::Impl {
     size_t freedThriftSize = 0;
     for (auto i = 0; i < rowGroups_.size(); i++) {
       const bool isExcluded = bits::isBitSet(res.filterResult.data(), i);
+      const auto numRows = *rowGroups_[i].num_rows();
       if (!isExcluded) {
         rowGroupIds_.push_back(i);
         firstRowOfRowGroup_.push_back(rowNumber);
+        processedStrideRows_ += numRows;
       } else {
         if (i != 0) {
           // Clear the metadata of row groups that are not read. This helps
@@ -1523,6 +1525,7 @@ class ParquetRowReader::Impl {
         }
         if (rowGroupInRange[i]) {
           skippedStrides_++;
+          skippedStrideRows_ += numRows;
         }
       }
 
@@ -1595,6 +1598,8 @@ class ParquetRowReader::Impl {
   void updateRuntimeStats(dwio::common::RuntimeStatistics& stats) const {
     stats.skippedStrides += skippedStrides_;
     stats.processedStrides += rowGroupIds_.size();
+    stats.skippedStrideRows += skippedStrideRows_;
+    stats.processedStrideRows += processedStrideRows_;
     stats.parquetFooterEstimatedBytes += readerBase_->initialThriftSize();
     stats.columnReaderStats.pageLoadTimeNs.merge(
         columnReaderStats_.pageLoadTimeNs);
@@ -1642,6 +1647,8 @@ class ParquetRowReader::Impl {
   uint64_t rowsInCurrentRowGroup_;
   uint64_t currentRowInGroup_;
   uint32_t skippedStrides_{0};
+  uint64_t processedStrideRows_{0};
+  uint64_t skippedStrideRows_{0};
 
   std::unique_ptr<dwio::common::SelectiveColumnReader> columnReader_;
 

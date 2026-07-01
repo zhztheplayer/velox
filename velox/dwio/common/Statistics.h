@@ -760,6 +760,12 @@ struct RuntimeStatistics {
   // Number of strides (row groups) processed based on statistics.
   int64_t processedStrides{0};
 
+  // Total rows in strides (row groups) that were skipped based on statistics.
+  int64_t skippedStrideRows{0};
+
+  // Total rows in strides (row groups) that were processed.
+  int64_t processedStrideRows{0};
+
   int64_t footerBufferOverread{0};
 
   int64_t footerBufferUnderread{0};
@@ -799,6 +805,12 @@ struct RuntimeStatistics {
     }
     if (processedStrides > 0) {
       result.emplace("processedStrides", RuntimeMetric(processedStrides));
+    }
+    if (skippedStrideRows > 0) {
+      result.emplace("skippedStrideRows", RuntimeMetric(skippedStrideRows));
+    }
+    if (processedStrideRows > 0) {
+      result.emplace("processedStrideRows", RuntimeMetric(processedStrideRows));
     }
     if (footerBufferOverread > 0) {
       result.emplace(

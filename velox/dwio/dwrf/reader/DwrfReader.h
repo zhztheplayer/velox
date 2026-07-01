@@ -109,6 +109,8 @@ class DwrfRowReader : public StrideIndexProvider,
       dwio::common::RuntimeStatistics& stats) const override {
     stats.skippedStrides += skippedStrides_;
     stats.processedStrides += processedStrides_;
+    stats.skippedStrideRows += skippedStrideRows_;
+    stats.processedStrideRows += processedStrideRows_;
     stats.footerBufferOverread += getReader().footerBufferOverread();
     stats.numStripes += stripeCeiling_ - firstStripe_;
     stats.columnReaderStats.mergeFrom(*columnReaderStats_);
@@ -212,6 +214,12 @@ class DwrfRowReader : public StrideIndexProvider,
 
   // Number of processed strides.
   int64_t processedStrides_{0};
+
+  // Total rows in skipped strides.
+  int64_t skippedStrideRows_{0};
+
+  // Total rows in processed strides.
+  int64_t processedStrideRows_{0};
 
   dwio::common::UnitLoaderStats unitLoadStats_;
 

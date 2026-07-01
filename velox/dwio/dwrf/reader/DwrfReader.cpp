@@ -548,6 +548,7 @@ void DwrfRowReader::checkSkipStrides(uint64_t strideSize) {
         std::min(currentRowInStripe_ + strideSize, rowsInCurrentStripe_);
     ++currentStride;
     ++skippedStrides_;
+    skippedStrideRows_ += strideSize;
   }
   if (foundStridesToSkip && currentRowInStripe_ < rowsInCurrentStripe_) {
     getSelectiveColumnReader()->seekToRowGroup(currentStride);
@@ -612,6 +613,7 @@ int64_t DwrfRowReader::nextRowNumber() {
             skippedStrides_ += static_cast<int64_t>(
                 bits::divRoundUp(numStripeRows, strideSize));
           }
+          skippedStrideRows_ += numStripeRows;
           goto advanceToNextStripe;
         }
       }
@@ -623,6 +625,7 @@ int64_t DwrfRowReader::nextRowNumber() {
     if (currentRowInStripe_ < rowsInCurrentStripe_) {
       if (strideSize > 0 && currentRowInStripe_ % strideSize == 0) {
         ++processedStrides_;
+        processedStrideRows_ += strideSize;
       }
       nextRowNumber_ = firstRowOfStripe_[currentStripe_] + currentRowInStripe_;
       return *nextRowNumber_;
