@@ -15,8 +15,10 @@
  */
 
 #include "velox/dwio/dwrf/reader/SelectiveStringDictionaryColumnReader.h"
+
 #include "velox/dwio/common/BufferUtil.h"
 #include "velox/dwio/dwrf/common/DecoderUtil.h"
+#include "velox/dwio/dwrf/common/DwrfRuntimeStats.h"
 
 namespace facebook::velox::dwrf {
 
@@ -284,7 +286,8 @@ void SelectiveStringDictionaryColumnReader::makeFlat(VectorPtr* result) {
       numValues_,
       std::move(values),
       std::move(stringBuffers));
-  statistics_.flattenStringDictionaryValues += numValues_;
+  statistics_.accumulateFormatStat(
+      DwrfRuntimeStats::kFlattenStringDictionaryValues, numValues_);
 }
 
 void SelectiveStringDictionaryColumnReader::getValues(

@@ -237,8 +237,12 @@ void ColumnReaderStatistics::initColumnStatsCollection(
 }
 
 void ColumnReaderStatistics::mergeFrom(const ColumnReaderStatistics& other) {
-  flattenStringDictionaryValues += other.flattenStringDictionaryValues;
-  pageLoadTimeNs.merge(other.pageLoadTimeNs);
+  for (const auto& [name, metric] : other.formatStats) {
+    auto [it, inserted] = formatStats.emplace(name, metric);
+    if (!inserted) {
+      it->second.merge(metric);
+    }
+  }
   if (other.decodingStatsSet) {
     if (!decodingStatsSet) {
       decodingStatsSet.emplace();
@@ -249,21 +253,7 @@ void ColumnReaderStatistics::mergeFrom(const ColumnReaderStatistics& other) {
 
 void ColumnReaderStatistics::toRuntimeMetrics(
     std::unordered_map<std::string, RuntimeMetric>& result) const {
-  if (flattenStringDictionaryValues > 0) {
-    result.emplace(
-        "flattenStringDictionaryValues",
-        RuntimeMetric(flattenStringDictionaryValues));
-  }
-  if (pageLoadTimeNs.sum() > 0) {
-    result.emplace(
-        "pageLoadTimeNs",
-        RuntimeMetric(
-            pageLoadTimeNs.sum(),
-            pageLoadTimeNs.count(),
-            pageLoadTimeNs.min(),
-            pageLoadTimeNs.max(),
-            RuntimeCounter::Unit::kNanos));
-  }
+  result.insert(formatStats.begin(), formatStats.end());
   if (decodingStatsSet) {
     decodingStatsSet->toRuntimeMetrics(result);
   }

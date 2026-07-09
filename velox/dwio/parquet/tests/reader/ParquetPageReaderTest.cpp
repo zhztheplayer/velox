@@ -18,6 +18,7 @@
 
 #include <thrift/lib/cpp2/protocol/Serializer.h>
 #include "velox/common/base/tests/GTestUtils.h"
+#include "velox/dwio/parquet/common/ParquetRuntimeStats.h"
 #include "velox/dwio/parquet/tests/ParquetTestBase.h"
 #include "velox/dwio/parquet/thrift/ParquetThrift.h"
 
@@ -56,7 +57,8 @@ TEST_F(ParquetPageReaderTest, smallPage) {
   auto maxValue = *header.data_page_header()->statistics()->max_value();
   EXPECT_EQ(minValue, expectedMinValue);
   EXPECT_EQ(maxValue, expectedMaxValue);
-  EXPECT_GT(stats.pageLoadTimeNs.sum(), 0);
+  EXPECT_GT(
+      stats.formatStats.at(ParquetRuntimeStats::kPageLoadTimeNs.first).sum, 0);
 }
 
 TEST_F(ParquetPageReaderTest, largePage) {
@@ -88,7 +90,8 @@ TEST_F(ParquetPageReaderTest, largePage) {
   auto maxValue = *header.data_page_header()->statistics()->max_value();
   EXPECT_EQ(minValue, expectedMinValue);
   EXPECT_EQ(maxValue, expectedMaxValue);
-  EXPECT_GT(stats.pageLoadTimeNs.sum(), 0);
+  EXPECT_GT(
+      stats.formatStats.at(ParquetRuntimeStats::kPageLoadTimeNs.first).sum, 0);
 }
 
 TEST_F(ParquetPageReaderTest, corruptedPageHeader) {

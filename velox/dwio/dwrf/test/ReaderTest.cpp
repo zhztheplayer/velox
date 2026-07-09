@@ -29,6 +29,7 @@
 #include "velox/dwio/common/FileSink.h"
 #include "velox/dwio/common/tests/utils/BatchMaker.h"
 #include "velox/dwio/dwrf/common/Common.h"
+#include "velox/dwio/dwrf/common/DwrfRuntimeStats.h"
 #include "velox/dwio/dwrf/reader/DwrfReader.h"
 #include "velox/dwio/dwrf/test/OrcTest.h"
 #include "velox/dwio/dwrf/test/utils/E2EWriterTestUtil.h"
@@ -2854,7 +2855,10 @@ TEST_F(TestReader, readStringDictionaryAsFlat) {
   ASSERT_EQ(c0->valueVector()->size(), dictionary.size());
   dwio::common::RuntimeStatistics stats;
   rowReader->updateRuntimeStats(stats);
-  ASSERT_EQ(stats.columnReaderStats.flattenStringDictionaryValues, 0);
+  ASSERT_EQ(
+      stats.columnReaderStats.formatStats.count(
+          DwrfRuntimeStats::kFlattenStringDictionaryValues.first),
+      0);
   spec->childByName("c0")->setFilter(
       std::make_unique<common::BytesValues>(
           std::vector<std::string>{"aaaaaaaaaaaaaaaaaaaa"}, false));
@@ -2865,7 +2869,11 @@ TEST_F(TestReader, readStringDictionaryAsFlat) {
   ASSERT_TRUE(actual->as<RowVector>()->childAt(0)->isFlatEncoding());
   stats = {};
   rowReader->updateRuntimeStats(stats);
-  ASSERT_EQ(stats.columnReaderStats.flattenStringDictionaryValues, 1);
+  ASSERT_EQ(
+      stats.columnReaderStats.formatStats
+          .at(DwrfRuntimeStats::kFlattenStringDictionaryValues.first)
+          .sum,
+      1);
 }
 
 // A primitive subfield is missing in file, and result is not reused.

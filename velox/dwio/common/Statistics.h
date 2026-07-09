@@ -22,7 +22,6 @@
 #include <folly/container/F14Map.h>
 #include <type_traits>
 #include <utility>
-#include "velox/common/time/CpuWallTimer.h"
 #include "velox/common/time/Timer.h"
 #include "velox/dwio/common/Options.h"
 #include "velox/dwio/common/TypeWithId.h"
@@ -516,12 +515,8 @@ struct DecodingStatsSet {
 
 /// Collects runtime metrics produced while reading columns.
 struct ColumnReaderStatistics {
-  // Number of rows returned by string dictionary reader that is flattened
-  // instead of keeping dictionary encoding.
-  int64_t flattenStringDictionaryValues{0};
-
-  // Total time spent in loading pages, in nanoseconds.
-  io::IoCounter pageLoadTimeNs;
+  // Format-specific metrics collected while reading columns.
+  folly::F14FastMap<std::string, RuntimeMetric> formatStats;
 
   // Per-column decoding statistics. Only populated when decoding stats
   // collection is enabled.
@@ -532,6 +527,18 @@ struct ColumnReaderStatistics {
   void initColumnStatsCollection(
       const TypeWithId& schema,
       const RowReaderOptions& options);
+
+  void accumulateFormatStat(
+      const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
+      int64_t value) {
+    auto [it, inserted] = formatStats.try_emplace(std::string{stat.first});
+    if (inserted) {
+      it->second.unit = stat.second;
+    } else {
+      VELOX_CHECK_EQ(it->second.unit, stat.second);
+    }
+    it->second.addValue(value);
+  }
 
   /// Merges all stats from another ColumnReaderStatistics instance.
   void mergeFrom(const ColumnReaderStatistics& other);
