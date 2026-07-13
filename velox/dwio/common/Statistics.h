@@ -307,9 +307,7 @@ class IntegerColumnStatistics : public virtual ColumnStatistics {
   std::optional<int64_t> sum_;
 };
 
-/**
- * Statistics for timestamp columns.
- */
+/// Statistics for timestamp columns.
 class TimestampColumnStatistics : public virtual ColumnStatistics {
  public:
   TimestampColumnStatistics(
@@ -348,9 +346,7 @@ class TimestampColumnStatistics : public virtual ColumnStatistics {
   std::optional<Timestamp> max_;
 };
 
-/**
- * Statistics for string columns.
- */
+/// Statistics for string columns.
 class StringColumnStatistics : public virtual ColumnStatistics {
  public:
   StringColumnStatistics(

@@ -127,9 +127,9 @@ std::string TimestampColumnStatistics::toString() const {
   return folly::to<std::string>(
       ColumnStatistics::toString(),
       ", min: ",
-      (min_.has_value() ? min_.value().toString() : "unknown"),
+      toStringOr(min_, kUnknown),
       ", max: ",
-      (max_.has_value() ? max_.value().toString() : "unknown"));
+      toStringOr(max_, kUnknown));
 }
 
 std::string StringColumnStatistics::toString() const {
