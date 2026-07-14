@@ -515,6 +515,14 @@ struct DecodingStatsSet {
 
 /// Thread-safe collection of format-specific runtime metrics keyed by name.
 struct FormatStatsSet {
+  explicit FormatStatsSet(std::optional<FileFormat> format = std::nullopt)
+      : format_(format) {}
+
+  /// Returns the bound file format if set.
+  std::optional<FileFormat> format() const {
+    return format_;
+  }
+
   /// Accumulates a named runtime metric.
   void accumulate(
       const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
@@ -527,18 +535,26 @@ struct FormatStatsSet {
   void toRuntimeMetrics(
       std::unordered_map<std::string, RuntimeMetric>& result) const;
 
-  /// Returns true if the set contains a metric with the specified name.
+  /// Returns true if the set contains a metric with the specified bare name.
   bool contains(std::string_view name) const;
 
-  /// Returns a copy of the metric with the specified name if present.
+  /// Returns a copy of the metric with the specified bare name if present.
   std::optional<RuntimeMetric> get(std::string_view name) const;
 
  private:
+  std::string formatStatName(std::string_view name) const;
+
+  std::optional<FileFormat> format_;
+
   folly::Synchronized<folly::F14FastMap<std::string, RuntimeMetric>> map_;
 };
 
 /// Collects runtime metrics produced while reading columns.
 struct ColumnReaderStatistics {
+  explicit ColumnReaderStatistics(
+      std::optional<FileFormat> format = std::nullopt)
+      : formatStats(format) {}
+
   /// Stores whole-reader named counters keyed by metric name.
   ///
   /// Use this for format-specific metrics accumulated ad hoc while reading.

@@ -226,11 +226,21 @@ void DecodingStatsSet::toRuntimeMetrics(
   }
 }
 
+std::string FormatStatsSet::formatStatName(std::string_view name) const {
+  if (!format_.has_value()) {
+    return std::string{name};
+  }
+  return fmt::format("{}.{}", FileFormatName::toName(*format_), name);
+}
+
 void FormatStatsSet::accumulate(
     const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
     int64_t value) {
+  VELOX_CHECK(
+      format_.has_value(),
+      "FormatStatsSet format must be set before accumulating format stats");
   auto locked = map_.wlock();
-  auto [it, inserted] = locked->try_emplace(std::string{stat.first});
+  auto [it, inserted] = locked->try_emplace(formatStatName(stat.first));
   if (inserted) {
     it->second.unit = stat.second;
   } else {
@@ -258,12 +268,12 @@ void FormatStatsSet::toRuntimeMetrics(
 
 bool FormatStatsSet::contains(std::string_view name) const {
   auto locked = map_.rlock();
-  return locked->contains(name);
+  return locked->contains(formatStatName(name));
 }
 
 std::optional<RuntimeMetric> FormatStatsSet::get(std::string_view name) const {
   auto locked = map_.rlock();
-  auto it = locked->find(name);
+  auto it = locked->find(formatStatName(name));
   if (it != locked->end()) {
     return it->second;
   }

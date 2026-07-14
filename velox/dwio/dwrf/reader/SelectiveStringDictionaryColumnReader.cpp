@@ -32,6 +32,11 @@ SelectiveStringDictionaryColumnReader::SelectiveStringDictionaryColumnReader(
       lastStrideIndex_(-1),
       provider_(params.stripeStreams().getStrideIndexProvider()),
       statistics_(params.runtimeStatistics()) {
+  VELOX_CHECK_EQ(
+      statistics_.formatStats.format(),
+      std::optional{dwio::common::FileFormat::DWRF},
+      "SelectiveStringDictionaryColumnReader requires "
+      "ColumnReaderStatistics bound to DWRF");
   auto& stripe = params.stripeStreams();
   EncodingKey encodingKey{fileType_->id(), params.flatMapContext().sequence};
   version_ = convertRleVersion(stripe, encodingKey);
