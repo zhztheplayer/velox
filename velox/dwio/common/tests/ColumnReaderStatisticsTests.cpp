@@ -25,6 +25,17 @@ using namespace facebook::velox::dwio::common;
 using facebook::velox::RuntimeMetric;
 using facebook::velox::TypeKind;
 
+namespace {
+
+constexpr std::string_view kExampleFormatMetricName = "exampleFormatMetric";
+
+constexpr std::pair<std::string_view, facebook::velox::RuntimeCounter::Unit>
+    kExampleFormatMetric = {
+        kExampleFormatMetricName,
+        facebook::velox::RuntimeCounter::Unit::kNone};
+
+} // namespace
+
 TEST(IoCounterTest, BasicOperations) {
   facebook::velox::io::IoCounter counter;
 
@@ -180,9 +191,6 @@ TEST(DecodingStatsSetTest, ToRuntimeMetricsWithDecodeTime) {
 }
 
 TEST(RuntimeStatisticsTest, ToRuntimeMetricMap) {
-  constexpr std::pair<std::string_view, facebook::velox::RuntimeCounter::Unit>
-      kExampleFormatMetric = {
-          "exampleFormatMetric", facebook::velox::RuntimeCounter::Unit::kNone};
   RuntimeStatistics stats;
 
   // Empty stats produces empty result.
@@ -214,7 +222,7 @@ TEST(RuntimeStatisticsTest, ToRuntimeMetricMap) {
   EXPECT_EQ(result["column_1.BIGINT.decompressCPUTimeNanos"].count, 1);
   EXPECT_EQ(result["column_1.BIGINT.decodeCPUTimeNanos"].sum, 12'000);
   EXPECT_EQ(result["column_1.BIGINT.decodeCPUTimeNanos"].count, 1);
-  EXPECT_EQ(result[std::string(kExampleFormatMetric.first)].sum, 1'000);
+  EXPECT_EQ(result[std::string(kExampleFormatMetricName)].sum, 1'000);
 }
 
 TEST(DecodingStatsSetConcurrencyTest, ConcurrentGetOrCreate) {
@@ -344,9 +352,6 @@ TEST(DecodingStatsSetTest, MergeFromEmpty) {
 }
 
 TEST(ColumnReaderStatisticsTest, MergeFromWithDecodingStats) {
-  constexpr std::pair<std::string_view, facebook::velox::RuntimeCounter::Unit>
-      kExampleFormatMetric = {
-          "exampleFormatMetric", facebook::velox::RuntimeCounter::Unit::kNone};
   ColumnReaderStatistics src;
   src.accumulateFormatStat(kExampleFormatMetric, 100);
   src.decodingStatsSet.emplace();
@@ -358,8 +363,8 @@ TEST(ColumnReaderStatisticsTest, MergeFromWithDecodingStats) {
   dst.accumulateFormatStat(kExampleFormatMetric, 50);
   dst.mergeFrom(src);
 
-  EXPECT_EQ(
-      dst.formatStats.at(std::string{kExampleFormatMetric.first}).sum, 150);
+  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
+  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;
@@ -368,9 +373,6 @@ TEST(ColumnReaderStatisticsTest, MergeFromWithDecodingStats) {
 }
 
 TEST(ColumnReaderStatisticsTest, MergeFromBothWithDecodingStats) {
-  constexpr std::pair<std::string_view, facebook::velox::RuntimeCounter::Unit>
-      kExampleFormatMetric = {
-          "exampleFormatMetric", facebook::velox::RuntimeCounter::Unit::kNone};
   ColumnReaderStatistics src;
   src.accumulateFormatStat(kExampleFormatMetric, 100);
   src.decodingStatsSet.emplace();
@@ -385,8 +387,8 @@ TEST(ColumnReaderStatisticsTest, MergeFromBothWithDecodingStats) {
 
   dst.mergeFrom(src);
 
-  EXPECT_EQ(
-      dst.formatStats.at(std::string{kExampleFormatMetric.first}).sum, 150);
+  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
+  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;
@@ -411,9 +413,6 @@ TEST(WithDecompressStatsTest, NullCounter) {
 }
 
 TEST(ColumnReaderStatisticsTest, MergeFromWithoutDecodingStats) {
-  constexpr std::pair<std::string_view, facebook::velox::RuntimeCounter::Unit>
-      kExampleFormatMetric = {
-          "exampleFormatMetric", facebook::velox::RuntimeCounter::Unit::kNone};
   ColumnReaderStatistics src;
   src.accumulateFormatStat(kExampleFormatMetric, 100);
 
@@ -425,8 +424,8 @@ TEST(ColumnReaderStatisticsTest, MergeFromWithoutDecodingStats) {
 
   dst.mergeFrom(src);
 
-  EXPECT_EQ(
-      dst.formatStats.at(std::string{kExampleFormatMetric.first}).sum, 150);
+  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
+  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;

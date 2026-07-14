@@ -57,8 +57,10 @@ TEST_F(ParquetPageReaderTest, smallPage) {
   auto maxValue = *header.data_page_header()->statistics()->max_value();
   EXPECT_EQ(minValue, expectedMinValue);
   EXPECT_EQ(maxValue, expectedMaxValue);
+  ASSERT_TRUE(
+      stats.formatStats.get(ParquetRuntimeStats::kPageLoadTimeNs).has_value());
   EXPECT_GT(
-      stats.formatStats.at(ParquetRuntimeStats::kPageLoadTimeNs.first).sum, 0);
+      stats.formatStats.get(ParquetRuntimeStats::kPageLoadTimeNs)->sum, 0);
 }
 
 TEST_F(ParquetPageReaderTest, largePage) {
@@ -90,8 +92,10 @@ TEST_F(ParquetPageReaderTest, largePage) {
   auto maxValue = *header.data_page_header()->statistics()->max_value();
   EXPECT_EQ(minValue, expectedMinValue);
   EXPECT_EQ(maxValue, expectedMaxValue);
+  ASSERT_TRUE(
+      stats.formatStats.get(ParquetRuntimeStats::kPageLoadTimeNs).has_value());
   EXPECT_GT(
-      stats.formatStats.at(ParquetRuntimeStats::kPageLoadTimeNs.first).sum, 0);
+      stats.formatStats.get(ParquetRuntimeStats::kPageLoadTimeNs)->sum, 0);
 }
 
 TEST_F(ParquetPageReaderTest, corruptedPageHeader) {

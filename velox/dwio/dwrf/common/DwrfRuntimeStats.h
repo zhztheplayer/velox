@@ -25,9 +25,13 @@ namespace facebook::velox::dwrf {
 
 struct DwrfRuntimeStats {
   /// Count of string dictionary values that were flattened during reading.
+  inline static constexpr std::string_view kFlattenStringDictionaryValues =
+      "flattenStringDictionaryValues";
+
+  /// Describes the flatten-string-dictionary runtime metric.
   inline static constexpr std::pair<std::string_view, RuntimeCounter::Unit>
-      kFlattenStringDictionaryValues = {
-          "flattenStringDictionaryValues",
+      kFlattenStringDictionaryValuesMetric = {
+          kFlattenStringDictionaryValues,
           RuntimeCounter::Unit::kNone};
 };
 

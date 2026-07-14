@@ -513,13 +513,40 @@ struct DecodingStatsSet {
       map_;
 };
 
+/// Thread-safe collection of format-specific runtime metrics keyed by name.
+struct FormatStatsSet {
+  /// Accumulates a named runtime metric.
+  void accumulate(
+      const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
+      int64_t value);
+
+  /// Merges all named runtime metrics from another set.
+  void mergeFrom(const FormatStatsSet& other);
+
+  /// Exports metrics into the runtime metrics result map.
+  void toRuntimeMetrics(
+      std::unordered_map<std::string, RuntimeMetric>& result) const;
+
+  /// Returns true if the set contains a metric with the specified name.
+  bool contains(std::string_view name) const;
+
+  /// Returns a copy of the metric with the specified name if present.
+  std::optional<RuntimeMetric> get(std::string_view name) const;
+
+ private:
+  folly::Synchronized<folly::F14FastMap<std::string, RuntimeMetric>> map_;
+};
+
 /// Collects runtime metrics produced while reading columns.
 struct ColumnReaderStatistics {
-  // Format-specific metrics collected while reading columns.
-  folly::F14FastMap<std::string, RuntimeMetric> formatStats;
+  /// Stores whole-reader named counters keyed by metric name.
+  ///
+  /// Use this for format-specific metrics accumulated ad hoc while reading.
+  FormatStatsSet formatStats;
 
-  // Per-column decoding statistics. Only populated when decoding stats
-  // collection is enabled.
+  /// Stores per-column decode and decompress timing keyed by column node id.
+  ///
+  /// Only populated when decoding stats collection is enabled.
   std::optional<DecodingStatsSet> decodingStatsSet;
 
   /// Initializes column stats collection for the given schema if enabled in
@@ -528,17 +555,10 @@ struct ColumnReaderStatistics {
       const TypeWithId& schema,
       const RowReaderOptions& options);
 
+  /// Accumulates a named format-specific runtime metric.
   void accumulateFormatStat(
       const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
-      int64_t value) {
-    auto [it, inserted] = formatStats.try_emplace(std::string{stat.first});
-    if (inserted) {
-      it->second.unit = stat.second;
-    } else {
-      VELOX_CHECK_EQ(it->second.unit, stat.second);
-    }
-    it->second.addValue(value);
-  }
+      int64_t value);
 
   /// Merges all stats from another ColumnReaderStatistics instance.
   void mergeFrom(const ColumnReaderStatistics& other);

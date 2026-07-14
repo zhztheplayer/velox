@@ -25,8 +25,11 @@ namespace facebook::velox::parquet {
 
 struct ParquetRuntimeStats {
   /// Time spent loading Parquet pages in nanoseconds.
+  inline static constexpr std::string_view kPageLoadTimeNs = "pageLoadTimeNs";
+
+  /// Describes the page-load-time runtime metric.
   inline static constexpr std::pair<std::string_view, RuntimeCounter::Unit>
-      kPageLoadTimeNs = {"pageLoadTimeNs", RuntimeCounter::Unit::kNanos};
+      kPageLoadTimeNsMetric = {kPageLoadTimeNs, RuntimeCounter::Unit::kNanos};
 };
 
 } // namespace facebook::velox::parquet

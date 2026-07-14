@@ -2856,8 +2856,8 @@ TEST_F(TestReader, readStringDictionaryAsFlat) {
   dwio::common::RuntimeStatistics stats;
   rowReader->updateRuntimeStats(stats);
   ASSERT_EQ(
-      stats.columnReaderStats.formatStats.count(
-          DwrfRuntimeStats::kFlattenStringDictionaryValues.first),
+      stats.columnReaderStats.formatStats.contains(
+          DwrfRuntimeStats::kFlattenStringDictionaryValues),
       0);
   spec->childByName("c0")->setFilter(
       std::make_unique<common::BytesValues>(
@@ -2869,10 +2869,13 @@ TEST_F(TestReader, readStringDictionaryAsFlat) {
   ASSERT_TRUE(actual->as<RowVector>()->childAt(0)->isFlatEncoding());
   stats = {};
   rowReader->updateRuntimeStats(stats);
+  ASSERT_TRUE(stats.columnReaderStats.formatStats
+                  .get(DwrfRuntimeStats::kFlattenStringDictionaryValues)
+                  .has_value());
   ASSERT_EQ(
       stats.columnReaderStats.formatStats
-          .at(DwrfRuntimeStats::kFlattenStringDictionaryValues.first)
-          .sum,
+          .get(DwrfRuntimeStats::kFlattenStringDictionaryValues)
+          ->sum,
       1);
 }
 

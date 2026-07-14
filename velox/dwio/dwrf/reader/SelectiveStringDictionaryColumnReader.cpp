@@ -287,7 +287,7 @@ void SelectiveStringDictionaryColumnReader::makeFlat(VectorPtr* result) {
       std::move(values),
       std::move(stringBuffers));
   statistics_.accumulateFormatStat(
-      DwrfRuntimeStats::kFlattenStringDictionaryValues, numValues_);
+      DwrfRuntimeStats::kFlattenStringDictionaryValuesMetric, numValues_);
 }
 
 void SelectiveStringDictionaryColumnReader::getValues(
