@@ -274,9 +274,7 @@ class Filter : public velox::ISerializable {
   }
 
   /// Combines this filter with another filter using 'AND' logic.
-  virtual std::unique_ptr<Filter> mergeWith(const Filter* /*other*/) const {
-    VELOX_UNSUPPORTED("{}: mergeWith() is not supported.", toString());
-  }
+  std::unique_ptr<Filter> mergeWith(const Filter* other) const;
 
   static void merge(
       const std::shared_ptr<Filter>& newFilter,
@@ -407,10 +405,6 @@ class AlwaysFalse final : public Filter {
     return false;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* /*other*/) const final {
-    // false AND <any> is false.
-    return this->clone();
-  }
 };
 
 /// TODO Check if this filter is needed. This should not be passed down.
@@ -494,10 +488,6 @@ class AlwaysTrue final : public Filter {
     return true;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final {
-    // true AND <any> is <any>.
-    return other->clone();
-  }
 };
 
 /// Returns true if the value is null. Supports all data types.
@@ -585,7 +575,6 @@ class IsNull final : public Filter {
     return false;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 };
 
 /// Returns true if the value is not null. Supports all data types.
@@ -673,7 +662,6 @@ class IsNotNull final : public Filter {
     return true;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 };
 
 /// Tests whether boolean value is true or false or integral value is zero or
@@ -721,7 +709,10 @@ class BoolValue final : public Filter {
     }
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
+  bool value() const {
+    return value_;
+  }
+
 
  private:
   const bool value_;
@@ -829,7 +820,6 @@ class BigintRange final : public Filter {
     return isSingleValue_;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   std::string toString() const override {
     return fmt::format(
@@ -910,7 +900,6 @@ class NegatedBigintRange final : public Filter {
     return nonNegated_->upper();
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   std::string toString() const override {
     return "Negated" + nonNegated_->toString();
@@ -1123,7 +1112,6 @@ class BigintValuesUsingHashTable final : public Filter {
 
   bool testInt64Range(int64_t min, int64_t max, bool hashNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   int64_t min() const {
     return min_;
@@ -1141,6 +1129,14 @@ class BigintValuesUsingHashTable final : public Filter {
     return hashTable_;
   }
 
+  bool containsEmptyMarker() const {
+    return containsEmptyMarker_;
+  }
+
+  static constexpr int64_t emptyMarker() {
+    return kEmptyMarker;
+  }
+
   std::string toString() const override {
     return fmt::format(
         "BigintValuesUsingHashTable: [{}, {}] {}",
@@ -1152,9 +1148,6 @@ class BigintValuesUsingHashTable final : public Filter {
   bool testingEquals(const Filter& other) const final;
 
  private:
-  std::unique_ptr<Filter>
-  mergeWith(int64_t min, int64_t max, const Filter* other) const;
-
   static constexpr int64_t kEmptyMarker = 0xdeadbeefbadefeedL;
 
   // From Murmur hash.
@@ -1269,7 +1262,6 @@ class BigintValuesUsingBitmask final : public Filter {
 
   bool testInt64Range(int64_t min, int64_t max, bool hasNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   bool testingEquals(const Filter& other) const final;
 
@@ -1282,9 +1274,6 @@ class BigintValuesUsingBitmask final : public Filter {
   }
 
  private:
-  std::unique_ptr<Filter>
-  mergeWith(int64_t min, int64_t max, const Filter* other) const;
-
   std::vector<bool> bitmask_;
   const int64_t min_;
   const int64_t max_;
@@ -1335,7 +1324,6 @@ class BigintValuesUsingBloomFilter final : public Filter {
 
   bool testingEquals(const Filter& other) const override;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const override;
 
   void insert(int64_t value) {
     filter_.insert(hash(value));
@@ -1419,7 +1407,6 @@ class NegatedBigintValuesUsingHashTable final : public Filter {
 
   bool testInt64Range(int64_t min, int64_t max, bool hashNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   int64_t min() const {
     return nonNegated_->min();
@@ -1448,9 +1435,6 @@ class NegatedBigintValuesUsingHashTable final : public Filter {
   bool testingEquals(const Filter& other) const final;
 
  private:
-  std::unique_ptr<Filter>
-  mergeWith(int64_t min, int64_t max, const Filter* other) const;
-
   std::unique_ptr<BigintValuesUsingHashTable> nonNegated_;
 };
 
@@ -1497,7 +1481,6 @@ class NegatedBigintValuesUsingBitmask final : public Filter {
 
   bool testInt64Range(int64_t min, int64_t max, bool hasNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   bool testingEquals(const Filter& other) const final;
 
@@ -1514,9 +1497,6 @@ class NegatedBigintValuesUsingBitmask final : public Filter {
   }
 
  private:
-  std::unique_ptr<Filter>
-  mergeWith(int64_t min, int64_t max, const Filter* other) const;
-
   int64_t min_;
   int64_t max_;
   std::unique_ptr<BigintValuesUsingBitmask> nonNegated_;
@@ -1681,6 +1661,14 @@ class FloatingPointRange final : public AbstractRange {
   xsimd::batch_bool<double> testValues(xsimd::batch<double>) const final;
   xsimd::batch_bool<float> testValues(xsimd::batch<float>) const final;
 
+  T lower() const {
+    return lower_;
+  }
+
+  T upper() const {
+    return upper_;
+  }
+
   bool testDoubleRange(double min, double max, bool hasNull) const final {
     if (hasNull && nullAllowed_) {
       return true;
@@ -1689,63 +1677,6 @@ class FloatingPointRange final : public AbstractRange {
     return !(
         (!upperUnbounded_ && min > upper_) ||
         (!lowerUnbounded_ && max < lower_));
-  }
-
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final {
-    switch (other->kind()) {
-      case FilterKind::kAlwaysTrue:
-      case FilterKind::kAlwaysFalse:
-      case FilterKind::kIsNull:
-      case FilterKind::kMultiRange:
-        return other->mergeWith(this);
-      case FilterKind::kIsNotNull:
-        return std::make_unique<FloatingPointRange<T>>(
-            lower_,
-            lowerUnbounded_,
-            lowerExclusive_,
-            upper_,
-            upperUnbounded_,
-            upperExclusive_,
-            false);
-      case FilterKind::kDoubleRange:
-      case FilterKind::kFloatRange: {
-        bool bothNullAllowed = nullAllowed_ && other->testNull();
-
-        auto otherRange = static_cast<const FloatingPointRange<T>*>(other);
-
-        auto lower = std::max(lower_, otherRange->lower_);
-        auto upper = std::min(upper_, otherRange->upper_);
-
-        auto bothLowerUnbounded =
-            lowerUnbounded_ && otherRange->lowerUnbounded_;
-        auto bothUpperUnbounded =
-            upperUnbounded_ && otherRange->upperUnbounded_;
-
-        auto lowerExclusive = !bothLowerUnbounded &&
-            (!testDouble(lower) || !other->testDouble(lower));
-        auto upperExclusive = !bothUpperUnbounded &&
-            (!testDouble(upper) || !other->testDouble(upper));
-
-        if (lower > upper ||
-            (lower == upper && (lowerExclusive || upperExclusive))) {
-          if (bothNullAllowed) {
-            return std::make_unique<IsNull>();
-          }
-          return std::make_unique<AlwaysFalse>();
-        }
-
-        return std::make_unique<FloatingPointRange<T>>(
-            lower,
-            bothLowerUnbounded,
-            lowerExclusive,
-            upper,
-            bothUpperUnbounded,
-            upperExclusive,
-            bothNullAllowed);
-      }
-      default:
-        VELOX_UNREACHABLE();
-    }
   }
 
   std::string toString() const override;
@@ -2001,7 +1932,6 @@ class BytesRange final : public AbstractRange {
     return !singleValue_ || static_cast<int64_t>(lower_.size()) == length;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   xsimd::batch_bool<int32_t> testLengths(
       xsimd::batch<int32_t> lengths) const final {
@@ -2117,7 +2047,6 @@ class NegatedBytesRange final : public Filter {
     return true;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   bool isSingleValue() const {
     return nonNegated_->isSingleValue();
@@ -2154,8 +2083,6 @@ class NegatedBytesRange final : public Filter {
   }
 
  private:
-  std::unique_ptr<Filter> toMultiRange() const;
-
   std::unique_ptr<BytesRange> nonNegated_;
 };
 
@@ -2221,7 +2148,6 @@ class TimestampRange : public Filter {
     return !(min > upper_ || max < lower_);
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   bool isSingleValue() const {
     return singleValue_;
@@ -2296,10 +2222,17 @@ class BytesValues final : public Filter {
       std::optional<std::string_view> max,
       bool hasNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   const folly::F14FastSet<std::string>& values() const {
     return values_;
+  }
+
+  const std::string& lower() const {
+    return lower_;
+  }
+
+  const std::string& upper() const {
+    return upper_;
   }
 
   bool testingEquals(const Filter& other) const final;
@@ -2337,7 +2270,6 @@ class BigintMultiRange final : public Filter {
 
   bool testInt64Range(int64_t min, int64_t max, bool hasNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   const std::vector<std::unique_ptr<BigintRange>>& ranges() const {
     return ranges_;
@@ -2393,7 +2325,6 @@ class NegatedBytesValues final : public Filter {
       std::optional<std::string_view> max,
       bool hasNull) const final;
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   const folly::F14FastSet<std::string>& values() const {
     return nonNegated_->values();
@@ -2462,7 +2393,6 @@ class MultiRange final : public Filter {
     return filters_;
   }
 
-  std::unique_ptr<Filter> mergeWith(const Filter* other) const final;
 
   bool testingEquals(const Filter& other) const final;
 
