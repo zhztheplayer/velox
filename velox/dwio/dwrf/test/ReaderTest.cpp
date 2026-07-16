@@ -2869,13 +2869,12 @@ TEST_F(TestReader, readStringDictionaryAsFlat) {
   ASSERT_TRUE(actual->as<RowVector>()->childAt(0)->isFlatEncoding());
   stats = dwio::common::RuntimeStatistics();
   rowReader->updateRuntimeStats(stats);
-  ASSERT_TRUE(stats.columnReaderStats.formatStats
-                  .get("dwrf.flattenStringDictionaryValues")
-                  .has_value());
+  ASSERT_TRUE(stats.columnReaderStats.formatStats.contains(
+      "dwrf.flattenStringDictionaryValues"));
   ASSERT_EQ(
       stats.columnReaderStats.formatStats
-          .get("dwrf.flattenStringDictionaryValues")
-          ->sum,
+          .at("dwrf.flattenStringDictionaryValues")
+          .sum,
       1);
 }
 

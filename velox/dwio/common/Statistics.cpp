@@ -226,58 +226,27 @@ void DecodingStatsSet::toRuntimeMetrics(
   }
 }
 
-std::string FormatStatsSet::formatStatName(std::string_view name) const {
+std::string ColumnReaderStatistics::formatStatName(
+    std::string_view name) const {
   if (!format_.has_value()) {
     return std::string{name};
   }
   return fmt::format("{}.{}", FileFormatName::toName(*format_), name);
 }
 
-void FormatStatsSet::accumulate(
+void ColumnReaderStatistics::accumulateFormatStat(
     const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
     int64_t value) {
   VELOX_CHECK(
       format_.has_value(),
-      "FormatStatsSet format must be set before accumulating format stats");
-  auto locked = map_.wlock();
-  auto [it, inserted] = locked->try_emplace(formatStatName(stat.first));
+      "ColumnReaderStatistics format must be set before accumulating format stats");
+  auto [it, inserted] = formatStats.try_emplace(formatStatName(stat.first));
   if (inserted) {
     it->second.unit = stat.second;
   } else {
     VELOX_CHECK_EQ(it->second.unit, stat.second);
   }
   it->second.addValue(value);
-}
-
-void FormatStatsSet::mergeFrom(const FormatStatsSet& other) {
-  auto srcLocked = other.map_.rlock();
-  auto dstLocked = map_.wlock();
-  for (const auto& [name, metric] : *srcLocked) {
-    auto [it, inserted] = dstLocked->emplace(name, metric);
-    if (!inserted) {
-      it->second.merge(metric);
-    }
-  }
-}
-
-void FormatStatsSet::toRuntimeMetrics(
-    std::unordered_map<std::string, RuntimeMetric>& result) const {
-  auto locked = map_.rlock();
-  result.insert(locked->begin(), locked->end());
-}
-
-bool FormatStatsSet::contains(std::string_view name) const {
-  auto locked = map_.rlock();
-  return locked->contains(formatStatName(name));
-}
-
-std::optional<RuntimeMetric> FormatStatsSet::get(std::string_view name) const {
-  auto locked = map_.rlock();
-  auto it = locked->find(formatStatName(name));
-  if (it != locked->end()) {
-    return it->second;
-  }
-  return std::nullopt;
 }
 
 void ColumnReaderStatistics::initColumnStatsCollection(
@@ -290,14 +259,13 @@ void ColumnReaderStatistics::initColumnStatsCollection(
   registerDecodingStatsImpl(schema);
 }
 
-void ColumnReaderStatistics::accumulateFormatStat(
-    const std::pair<std::string_view, RuntimeCounter::Unit>& stat,
-    int64_t value) {
-  formatStats.accumulate(stat, value);
-}
-
 void ColumnReaderStatistics::mergeFrom(const ColumnReaderStatistics& other) {
-  formatStats.mergeFrom(other.formatStats);
+  for (const auto& [name, metric] : other.formatStats) {
+    auto [it, inserted] = formatStats.emplace(name, metric);
+    if (!inserted) {
+      it->second.merge(metric);
+    }
+  }
   if (other.decodingStatsSet) {
     if (!decodingStatsSet) {
       decodingStatsSet.emplace();
@@ -308,7 +276,7 @@ void ColumnReaderStatistics::mergeFrom(const ColumnReaderStatistics& other) {
 
 void ColumnReaderStatistics::toRuntimeMetrics(
     std::unordered_map<std::string, RuntimeMetric>& result) const {
-  formatStats.toRuntimeMetrics(result);
+  result.insert(formatStats.begin(), formatStats.end());
   if (decodingStatsSet) {
     decodingStatsSet->toRuntimeMetrics(result);
   }

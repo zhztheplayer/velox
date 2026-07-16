@@ -368,8 +368,12 @@ TEST(ColumnReaderStatisticsTest, MergeFromWithDecodingStats) {
   dst.accumulateFormatStat(kExampleFormatMetric, 50);
   dst.mergeFrom(src);
 
-  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
-  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
+  ASSERT_NE(
+      dst.formatStats.find(std::string(kExampleQualifiedFormatMetricName)),
+      dst.formatStats.end());
+  EXPECT_EQ(
+      dst.formatStats.at(std::string(kExampleQualifiedFormatMetricName)).sum,
+      150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;
@@ -392,8 +396,12 @@ TEST(ColumnReaderStatisticsTest, MergeFromBothWithDecodingStats) {
 
   dst.mergeFrom(src);
 
-  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
-  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
+  ASSERT_NE(
+      dst.formatStats.find(std::string(kExampleQualifiedFormatMetricName)),
+      dst.formatStats.end());
+  EXPECT_EQ(
+      dst.formatStats.at(std::string(kExampleQualifiedFormatMetricName)).sum,
+      150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;
@@ -429,8 +437,12 @@ TEST(ColumnReaderStatisticsTest, MergeFromWithoutDecodingStats) {
 
   dst.mergeFrom(src);
 
-  ASSERT_TRUE(dst.formatStats.get(kExampleFormatMetricName).has_value());
-  EXPECT_EQ(dst.formatStats.get(kExampleFormatMetricName)->sum, 150);
+  ASSERT_NE(
+      dst.formatStats.find(std::string(kExampleQualifiedFormatMetricName)),
+      dst.formatStats.end());
+  EXPECT_EQ(
+      dst.formatStats.at(std::string(kExampleQualifiedFormatMetricName)).sum,
+      150);
   ASSERT_TRUE(dst.decodingStatsSet.has_value());
 
   std::unordered_map<std::string, RuntimeMetric> result;

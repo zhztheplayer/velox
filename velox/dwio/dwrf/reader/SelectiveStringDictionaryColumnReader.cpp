@@ -33,7 +33,7 @@ SelectiveStringDictionaryColumnReader::SelectiveStringDictionaryColumnReader(
       provider_(params.stripeStreams().getStrideIndexProvider()),
       statistics_(params.runtimeStatistics()) {
   VELOX_CHECK_EQ(
-      statistics_.formatStats.format(),
+      statistics_.format(),
       std::optional{dwio::common::FileFormat::DWRF},
       "SelectiveStringDictionaryColumnReader requires "
       "ColumnReaderStatistics bound to DWRF");

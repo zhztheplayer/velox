@@ -63,7 +63,7 @@ class PageReader {
         stats_(stats),
         sessionTimezone_(sessionTimezone) {
     VELOX_CHECK_EQ(
-        stats_.formatStats.format(),
+        stats_.format(),
         std::optional{dwio::common::FileFormat::PARQUET},
         "PageReader requires ColumnReaderStatistics bound to PARQUET");
     type_->makeLevelInfo(leafInfo_);
@@ -90,7 +90,7 @@ class PageReader {
         stats_(stats),
         sessionTimezone_(sessionTimezone) {
     VELOX_CHECK_EQ(
-        stats_.formatStats.format(),
+        stats_.format(),
         std::optional{dwio::common::FileFormat::PARQUET},
         "PageReader requires ColumnReaderStatistics bound to PARQUET");
   }
