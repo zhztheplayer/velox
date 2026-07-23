@@ -151,6 +151,8 @@ class BaseHashTable {
   /// the HashTable (HashBuild, HashAggregation).
   static constexpr std::string_view kCapacity{"hashtable.capacity"};
   static constexpr std::string_view kNumRehashes{"hashtable.numRehashes"};
+  static constexpr std::string_view kRehashWallNanos{
+      "hashtable.rehashWallNanos"};
   static constexpr std::string_view kNumDistinct{"hashtable.numDistinct"};
   static constexpr std::string_view kNumTombstones{"hashtable.numTombstones"};
   static constexpr std::string_view kHashMode{"hashtable.hashMode"};
@@ -708,6 +710,8 @@ class HashTable : public BaseHashTable {
     runtimeStats[std::string(kHashMode)] =
         RuntimeMetric(static_cast<int64_t>(hashMode_));
     runtimeStats[std::string(kNumRehashes)] = RuntimeMetric(numRehashes_);
+    runtimeStats[std::string(kRehashWallNanos)] = RuntimeMetric(
+        saturateCast(rehashTiming_.wallNanos), RuntimeCounter::Unit::kNanos);
     runtimeStats[std::string(kNumDistinct)] = RuntimeMetric(numDistinct_);
     if (numTombstones_ != 0) {
       runtimeStats[std::string(kNumTombstones)] = RuntimeMetric(numTombstones_);
@@ -1228,6 +1232,8 @@ class HashTable : public BaseHashTable {
   int64_t numTombstones_{0};
   // Counts the number of rehash() calls.
   int64_t numRehashes_{0};
+  // Cumulative wall time spent in rehash() calls.
+  CpuWallTiming rehashTiming_;
   HashMode hashMode_ = HashMode::kArray;
   // Owns the memory of multiple build side hash join tables that are
   // combined into a single probe hash table.

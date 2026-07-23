@@ -79,6 +79,9 @@ These stats are reported only by HashBuild and HashAggregation operators.
    * - hashtable.numRehashes
      -
      - Number of rehash() calls.
+   * - hashtable.rehashWallNanos
+     - nanos
+     - Cumulative wall time spent in rehash() calls.
    * - hashtable.numDistinct
      -
      - Number of distinct keys in the hash table.

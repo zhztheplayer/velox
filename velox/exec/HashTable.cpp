@@ -1542,6 +1542,7 @@ void HashTable<ignoreNullKeys>::rehash(
     bool initNormalizedKeys,
     int8_t spillInputStartPartitionBit) {
   ++numRehashes_;
+  CpuWallTimer timer(rehashTiming_);
   if (canApplyParallelJoinBuild()) {
     parallelJoinBuild();
     return;

@@ -1093,6 +1093,10 @@ TEST_F(AggregationTest, largeValueRangeArray) {
   // see that it has an oversize range based array with just 2 entries. It is
   // then expected to change hash mode and rehash.
   EXPECT_EQ(1, runtimeStats.at("hashtable.numRehashes").count);
+  const auto& rehashWallNanos = runtimeStats.at("hashtable.rehashWallNanos");
+  EXPECT_EQ(RuntimeCounter::Unit::kNanos, rehashWallNanos.unit);
+  EXPECT_EQ(1, rehashWallNanos.count);
+  EXPECT_GE(rehashWallNanos.sum, 0);
 
   // The partial agg is expected to flush just once. The final agg gets one
   // batch.
