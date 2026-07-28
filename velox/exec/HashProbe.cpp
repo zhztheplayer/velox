@@ -33,6 +33,21 @@ namespace {
 
 // Batch size used when iterating the row container.
 constexpr int kBatchSize = 1024;
+
+template <typename T>
+int64_t applyBloomFilter(
+    const common::BigintValuesUsingBloomFilter& filter,
+    const DecodedVector& decoded,
+    SelectivityVector& rows) {
+  int64_t numRejected = 0;
+  rows.applyToSelected([&](vector_size_t row) {
+    if (!filter.testInt64(decoded.valueAt<T>(row))) {
+      ++numRejected;
+      rows.setValid(row, false);
+    }
+  });
+  return numRejected;
+}
 } // namespace
 
 // static
@@ -136,9 +151,18 @@ HashProbe::HashProbe(
       joinBridge_(operatorCtx_->task()->getHashJoinBridgeLocked(
           operatorCtx_->driverCtx()->splitGroupId,
           planNodeId())),
+      bypassBloomFilterMinRows_{
+          driverCtx->queryConfig().bypassHashProbeBloomFilterMinRows()},
+      bypassBloomFilterMinPct_{
+          driverCtx->queryConfig().bypassHashProbeBloomFilterMinPct()},
+      bypassBloomFilter_{
+          bypassBloomFilterMinRows_ <= 0 || bypassBloomFilterMinPct_ <= 0},
       filterResult_(1),
       outputTableRowsCapacity_(outputBatchSize_) {
   VELOX_CHECK_NOT_NULL(joinBridge_);
+  VELOX_USER_CHECK_GE(bypassBloomFilterMinRows_, 0);
+  VELOX_USER_CHECK_GE(bypassBloomFilterMinPct_, 0);
+  VELOX_USER_CHECK_LE(bypassBloomFilterMinPct_, 100);
 }
 
 void HashProbe::initialize() {
@@ -428,6 +452,72 @@ void HashProbe::pushdownDynamicFilters() {
       tableOutputProjections_.empty() && !filter_ && numFilters > 0 &&
       !table_->hashers()[0]->getBloomFilter() && !isRightJoin(joinType_)) {
     canReplaceWithDynamicFilter_ = true;
+  }
+}
+
+void HashProbe::applyBloomFilterForJoinProbe() {
+  if (bypassBloomFilter_ || nullAware_ || isSpillInput() ||
+      needToSpillInput() ||
+      !(isLeftJoin(joinType_) || isFullJoin(joinType_) ||
+        isLeftSemiProjectJoin(joinType_) || isAntiJoin(joinType_))) {
+    return;
+  }
+
+  bool hasBloomFilter = false;
+  for (const auto& hasher : table_->hashers()) {
+    if (hasher->getBloomFilter()) {
+      hasBloomFilter = true;
+      break;
+    }
+  }
+  if (!hasBloomFilter) {
+    bypassBloomFilter_ = true;
+    return;
+  }
+
+  const int64_t numTested = activeRows_.countSelected();
+  int64_t numRejected = 0;
+  const bool isSampling = bloomFilterSampledRows_ < bypassBloomFilterMinRows_;
+  for (auto i = 0; i < hashers_.size(); ++i) {
+    const auto& filter = table_->hashers()[i]->getBloomFilter();
+    if (!filter) {
+      continue;
+    }
+    const auto* bloomFilter =
+        checkedPointerCast<const common::BigintValuesUsingBloomFilter>(
+            filter.get());
+    const auto& decoded = hashers_[i]->decodedVector();
+    switch (hashers_[i]->typeKind()) {
+      case TypeKind::INTEGER:
+        numRejected +=
+            applyBloomFilter<int32_t>(*bloomFilter, decoded, activeRows_);
+        break;
+      case TypeKind::BIGINT:
+        numRejected +=
+            applyBloomFilter<int64_t>(*bloomFilter, decoded, activeRows_);
+        break;
+      default:
+        VELOX_UNREACHABLE();
+    }
+  }
+  activeRows_.updateBounds();
+
+  if (isSampling) {
+    bloomFilterSampledRows_ += numTested;
+    bloomFilterSampleRejectedRows_ += numRejected;
+    if (bloomFilterSampledRows_ >= bypassBloomFilterMinRows_) {
+      bypassBloomFilter_ =
+          (bloomFilterSampledRows_ - bloomFilterSampleRejectedRows_) * 100 >=
+          bloomFilterSampledRows_ * bypassBloomFilterMinPct_;
+    }
+  }
+
+  if (numTested > 0) {
+    addRuntimeStat(
+        std::string(kBloomFilterTestedRows), RuntimeCounter(numTested));
+    addRuntimeStat(
+        std::string(kBloomFilterAcceptedRows),
+        RuntimeCounter(numTested - numRejected));
   }
 }
 
@@ -772,6 +862,7 @@ void HashProbe::addInput(RowVectorPtr input) {
         activeRows_.size() - activeRows_.countSelected();
   }
 
+  applyBloomFilterForJoinProbe();
   table_->prepareForJoinProbe(*lookup_.get(), input_, activeRows_, false);
 
   if (joinIncludesMissesFromLeft(joinType_)) {
