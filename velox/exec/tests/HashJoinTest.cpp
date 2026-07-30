@@ -1931,13 +1931,6 @@ TEST_P(HashJoinTest, bloomFilterLocalProbe) {
           "ON t.t_k0 = u.u_k0",
       },
       {
-          "full",
-          core::JoinType::kFull,
-          {"t_k0", "u_k0"},
-          "SELECT t.t_k0, u.u_k0 FROM t FULL OUTER JOIN u "
-          "ON t.t_k0 = u.u_k0",
-      },
-      {
           "left semi project",
           core::JoinType::kLeftSemiProject,
           {"t_k0", "match"},

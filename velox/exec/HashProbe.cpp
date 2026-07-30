@@ -458,7 +458,7 @@ void HashProbe::pushdownDynamicFilters() {
 void HashProbe::applyBloomFilterForJoinProbe() {
   if (bypassBloomFilter_ || nullAware_ || isSpillInput() ||
       needToSpillInput() ||
-      !(isLeftJoin(joinType_) || isFullJoin(joinType_) ||
+      !(isLeftJoin(joinType_) ||
         isLeftSemiProjectJoin(joinType_) || isAntiJoin(joinType_))) {
     return;
   }
