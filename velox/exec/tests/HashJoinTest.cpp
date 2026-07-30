@@ -1916,6 +1916,42 @@ TEST_P(MultiThreadedHashJoinTest, nullAwareAntiJoinWithFilterEmptyBatch) {
 }
 
 TEST_P(HashJoinTest, bloomFilterLocalProbe) {
+  struct TestCase {
+    const char* name;
+    core::JoinType joinType;
+    std::vector<std::string> outputLayout;
+    const char* referenceQuery;
+  };
+  const std::vector<TestCase> testCases = {
+      {
+          "left",
+          core::JoinType::kLeft,
+          {"t_k0", "u_k0"},
+          "SELECT t.t_k0, u.u_k0 FROM t LEFT JOIN u "
+          "ON t.t_k0 = u.u_k0",
+      },
+      {
+          "full",
+          core::JoinType::kFull,
+          {"t_k0", "u_k0"},
+          "SELECT t.t_k0, u.u_k0 FROM t FULL OUTER JOIN u "
+          "ON t.t_k0 = u.u_k0",
+      },
+      {
+          "left semi project",
+          core::JoinType::kLeftSemiProject,
+          {"t_k0", "match"},
+          "SELECT t.t_k0, t.t_k0 IN (SELECT u.u_k0 FROM u) FROM t",
+      },
+      {
+          "anti",
+          core::JoinType::kAnti,
+          {"t_k0"},
+          "SELECT t.t_k0 FROM t WHERE NOT EXISTS "
+          "(SELECT 1 FROM u WHERE t.t_k0 = u.u_k0)",
+      },
+  };
+
   const auto numRows = 10'000 + VectorHasher::kMaxDistinct;
   auto probe =
       makeRowVector({"t_k0"}, {makeFlatVector<int64_t>(numRows, [](auto row) {
@@ -1925,49 +1961,52 @@ TEST_P(HashJoinTest, bloomFilterLocalProbe) {
       {"u_k0"},
       {makeFlatVector<int64_t>(numRows, [](auto row) { return row * 1'000; })});
 
-  HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
-      .numDrivers(1)
-      .probeType(asRowType(probe->type()))
-      .probeKeys({"t_k0"})
-      .probeVectors({probe})
-      .buildType(asRowType(build->type()))
-      .buildKeys({"u_k0"})
-      .buildVectors({build})
-      .joinType(core::JoinType::kLeft)
-      .joinOutputLayout({"t_k0", "u_k0"})
-      .referenceQuery(
-          "SELECT t.t_k0, u.u_k0 FROM t LEFT JOIN u ON t.t_k0 = u.u_k0")
-      .config(
-          core::QueryConfig::kHashProbeBloomFilterPushdownMaxSize, "1048576")
-      .config(core::QueryConfig::kBypassHashProbeBloomFilterMinRows, "100")
-      .config(core::QueryConfig::kBypassHashProbeBloomFilterMinPct, "85")
-      .verifier([numRows](const std::shared_ptr<Task>& task, bool hasSpill) {
-        if (hasSpill) {
-          return;
-        }
-        uint64_t testedRows = 0;
-        uint64_t acceptedRows = 0;
-        for (const auto& pipelineStats : task->taskStats().pipelineStats) {
-          for (const auto& operatorStats : pipelineStats.operatorStats) {
-            if (operatorStats.operatorType != OperatorType::kHashProbe) {
-              continue;
-            }
-            if (const auto it = operatorStats.runtimeStats.find(
-                    std::string(HashProbe::kBloomFilterTestedRows));
-                it != operatorStats.runtimeStats.end()) {
-              testedRows += it->second.sum;
-            }
-            if (const auto it = operatorStats.runtimeStats.find(
-                    std::string(HashProbe::kBloomFilterAcceptedRows));
-                it != operatorStats.runtimeStats.end()) {
-              acceptedRows += it->second.sum;
+  for (const auto& testCase : testCases) {
+    SCOPED_TRACE(testCase.name);
+    HashJoinBuilder(*pool_, duckDbQueryRunner_, driverExecutor_.get())
+        .numDrivers(1)
+        .probeType(asRowType(probe->type()))
+        .probeKeys({"t_k0"})
+        .probeVectors({probe})
+        .buildType(asRowType(build->type()))
+        .buildKeys({"u_k0"})
+        .buildVectors({build})
+        .joinType(testCase.joinType)
+        .joinOutputLayout(
+            std::vector<std::string>(testCase.outputLayout))
+        .referenceQuery(testCase.referenceQuery)
+        .config(
+            core::QueryConfig::kHashProbeBloomFilterPushdownMaxSize, "1048576")
+        .config(core::QueryConfig::kBypassHashProbeBloomFilterMinRows, "100")
+        .config(core::QueryConfig::kBypassHashProbeBloomFilterMinPct, "85")
+        .verifier([numRows](const std::shared_ptr<Task>& task, bool hasSpill) {
+          if (hasSpill) {
+            return;
+          }
+          uint64_t testedRows = 0;
+          uint64_t acceptedRows = 0;
+          for (const auto& pipelineStats : task->taskStats().pipelineStats) {
+            for (const auto& operatorStats : pipelineStats.operatorStats) {
+              if (operatorStats.operatorType != OperatorType::kHashProbe) {
+                continue;
+              }
+              if (const auto it = operatorStats.runtimeStats.find(
+                      std::string(HashProbe::kBloomFilterTestedRows));
+                  it != operatorStats.runtimeStats.end()) {
+                testedRows += it->second.sum;
+              }
+              if (const auto it = operatorStats.runtimeStats.find(
+                      std::string(HashProbe::kBloomFilterAcceptedRows));
+                  it != operatorStats.runtimeStats.end()) {
+                acceptedRows += it->second.sum;
+              }
             }
           }
-        }
-        EXPECT_EQ(testedRows, numRows);
-        EXPECT_LT(acceptedRows, numRows * 10 / 100);
-      })
-      .run();
+          EXPECT_EQ(testedRows, numRows);
+          EXPECT_LT(acceptedRows, numRows * 10 / 100);
+        })
+        .run();
+  }
 }
 
 TEST_P(HashJoinTest, bypassBloomFilterLocalProbe) {
