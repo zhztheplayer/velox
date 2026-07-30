@@ -15,6 +15,7 @@
  */
 
 #include <folly/Benchmark.h>
+#include <folly/hash/Hash.h>
 #include <folly/init/Init.h>
 
 #include "velox/common/memory/Memory.h"
@@ -41,71 +42,71 @@ struct BenchmarkParams {
   bool enableBloomFilter;
 };
 
-struct BenchmarkData {
-  std::vector<RowVectorPtr> buildVectors;
-  std::vector<RowVectorPtr> probeVectors;
-};
-
-// Maps nearby row numbers to keys spread across the BIGINT range. Build keys
-// are even and miss keys are odd, making the requested hit rate exact while
-// avoiding artificial locality in the hash table.
-uint64_t mix(uint64_t value) {
-  value += 0x9e3779b97f4a7c15;
-  value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9;
-  value = (value ^ (value >> 27)) * 0x94d049bb133111eb;
-  return value ^ (value >> 31);
+int64_t buildKey(uint64_t row) {
+  return static_cast<int64_t>(
+      folly::hash::twang_mix64(row) & ~uint64_t{1});
 }
 
-int64_t buildKey(uint64_t row) {
-  return static_cast<int64_t>(mix(row) & ~uint64_t{1});
+template <typename MakeBatch>
+std::vector<RowVectorPtr> makeBatches(int64_t numRows, MakeBatch makeBatch) {
+  std::vector<RowVectorPtr> batches;
+  for (int64_t row = 0; row < numRows; row += kBatchSize) {
+    const auto size = static_cast<vector_size_t>(
+        std::min<int64_t>(kBatchSize, numRows - row));
+    batches.push_back(makeBatch(row, size));
+  }
+  return batches;
 }
 
 class HashJoinLeftBenchmark : public VectorTestBase {
  public:
-  BenchmarkData prepareData(const BenchmarkParams& params) {
-    BenchmarkData data;
-    data.buildVectors =
-        makeBatches(params.numBuildRows, [&](int64_t row) {
+  std::vector<RowVectorPtr> prepareBuildData(int64_t numBuildRows) {
+    return makeBatches(
+        numBuildRows, [&](int64_t row, vector_size_t size) {
           return makeRowVector(
               {"u0", "u1"},
               {
                   makeFlatVector<int64_t>(
-                      rowCount(row, params.numBuildRows),
-                      [&](vector_size_t index) {
+                      size, [&](vector_size_t index) {
                         return buildKey(row + index);
                       }),
                   makeFlatVector<int64_t>(
-                      rowCount(row, params.numBuildRows),
-                      [&](vector_size_t index) { return row + index; }),
+                      size, [&](vector_size_t index) { return row + index; }),
               });
         });
-
-    data.probeVectors = makeBatches(kNumProbeRows, [&](int64_t row) {
-      const auto size = rowCount(row, kNumProbeRows);
-      return makeRowVector(
-          {"t0"},
-          {makeFlatVector<int64_t>(size, [&](vector_size_t index) {
-            const auto probeRow = row + index;
-            const auto random = mix(probeRow);
-            if (random % 100 < params.hitPct) {
-              return buildKey(random % params.numBuildRows);
-            }
-            return static_cast<int64_t>(random | uint64_t{1});
-          })});
-    });
-    return data;
   }
 
-  uint64_t run(const BenchmarkParams& params, const BenchmarkData& data) {
+  std::vector<RowVectorPtr> prepareProbeData(
+      int64_t numBuildRows,
+      int32_t hitPct) {
+    return makeBatches(
+        kNumProbeRows, [&](int64_t row, vector_size_t size) {
+          return makeRowVector(
+              {"t0"},
+              {makeFlatVector<int64_t>(size, [&](vector_size_t index) {
+                const auto probeRow = row + index;
+                const auto random = folly::hash::twang_mix64(probeRow);
+                if (random % 100 < hitPct) {
+                  return buildKey(random % numBuildRows);
+                }
+                return static_cast<int64_t>(random | uint64_t{1});
+              })});
+        });
+  }
+
+  uint64_t run(
+      const BenchmarkParams& params,
+      const std::vector<RowVectorPtr>& buildVectors,
+      const std::vector<RowVectorPtr>& probeVectors) {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
     auto plan =
         PlanBuilder(planNodeIdGenerator, pool_.get())
-            .values(data.probeVectors)
+            .values(probeVectors)
             .hashJoin(
                 {"t0"},
                 {"u0"},
                 PlanBuilder(planNodeIdGenerator, pool_.get())
-                    .values(data.buildVectors)
+                    .values(buildVectors)
                     .planNode(),
                 "",
                 {"t0", "u1"},
@@ -122,24 +123,6 @@ class HashJoinLeftBenchmark : public VectorTestBase {
             params.enableBloomFilter ? std::to_string(100'000) : std::to_string(0))
         .config(core::QueryConfig::kBypassHashProbeBloomFilterMinPct, std::to_string(85));
     return query.countResults();
-  }
-
- private:
-  static vector_size_t rowCount(int64_t offset, int64_t totalRows) {
-    return static_cast<vector_size_t>(
-        std::min<int64_t>(kBatchSize, totalRows - offset));
-  }
-
-  template <typename MakeBatch>
-  std::vector<RowVectorPtr> makeBatches(
-      int64_t numRows,
-      MakeBatch makeBatch) {
-    std::vector<RowVectorPtr> batches;
-    batches.reserve((numRows + kBatchSize - 1) / kBatchSize);
-    for (int64_t row = 0; row < numRows; row += kBatchSize) {
-      batches.push_back(makeBatch(row));
-    }
-    return batches;
   }
 };
 
@@ -161,19 +144,23 @@ int main(int argc, char** argv) {
 
   auto benchmark = std::make_unique<HashJoinLeftBenchmark>();
   for (const auto numBuildRows : {1'000'000, 10'000'000}) {
+    auto buildVectors = std::make_shared<std::vector<RowVectorPtr>>(
+        benchmark->prepareBuildData(numBuildRows));
     for (const auto hitPct : {1, 10, 100}) {
+      auto probeVectors = std::make_shared<std::vector<RowVectorPtr>>(
+          benchmark->prepareProbeData(numBuildRows, hitPct));
       for (const auto enableBloomFilter : {false, true}) {
         const BenchmarkParams params{
             numBuildRows, hitPct, enableBloomFilter};
         folly::addBenchmark(
             __FILE__,
             benchmarkName(params),
-            [benchmark = benchmark.get(), params]() {
-              folly::BenchmarkSuspender suspender;
-              auto data = benchmark->prepareData(params);
-              suspender.dismiss();
-
-              const auto outputRows = benchmark->run(params, data);
+            [benchmark = benchmark.get(),
+             params,
+             buildVectors,
+             probeVectors]() {
+              const auto outputRows =
+                  benchmark->run(params, *buildVectors, *probeVectors);
               VELOX_CHECK_EQ(outputRows, kNumProbeRows);
               folly::doNotOptimizeAway(outputRows);
               return 1;
