@@ -22,6 +22,7 @@
 #include "velox/core/QueryConfig.h"
 #include "velox/exec/tests/utils/AssertQueryBuilder.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/functions/prestosql/aggregates/RegisterAggregateFunctions.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/parse/TypeResolver.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
@@ -33,7 +34,9 @@ using namespace facebook::velox::test;
 namespace {
 
 constexpr vector_size_t kBatchSize = 100'000;
-constexpr int64_t kNumProbeRows = 50'000'000;
+constexpr int64_t kProbePatternRows = 10'000'000;
+constexpr int32_t kProbeRepeats = 500;
+constexpr int64_t kNumProbeRows = kProbePatternRows * kProbeRepeats;
 constexpr uint64_t kBloomFilterMaxBytes = 256UL << 20;
 
 struct BenchmarkParams {
@@ -85,8 +88,8 @@ class HashJoinLeftBenchmark : public VectorTestBase {
   std::vector<RowVectorPtr> prepareProbeData(
       int64_t numBuildRows,
       int32_t hitPct) {
-    return makeBatches(
-        kNumProbeRows, [&](int64_t row, vector_size_t size) {
+    auto pattern = makeBatches(
+        kProbePatternRows, [&](int64_t row, vector_size_t size) {
           return makeRowVector(
               {"t0"},
               {makeFlatVector<int64_t>(size, [&](vector_size_t index) {
@@ -98,9 +101,15 @@ class HashJoinLeftBenchmark : public VectorTestBase {
                 return static_cast<int64_t>(random | uint64_t{1});
               })});
         });
+    std::vector<RowVectorPtr> probeVectors;
+    for (int32_t repeat = 0; repeat < kProbeRepeats; ++repeat) {
+      probeVectors.insert(
+          probeVectors.end(), pattern.begin(), pattern.end());
+    }
+    return probeVectors;
   }
 
-  uint64_t run(
+  void run(
       const BenchmarkParams& params,
       const std::vector<RowVectorPtr>& buildVectors,
       const std::vector<RowVectorPtr>& probeVectors) {
@@ -117,6 +126,7 @@ class HashJoinLeftBenchmark : public VectorTestBase {
                 "",
                 {"t0", "u1"},
                 core::JoinType::kLeft)
+            .singleAggregation({}, {"count(1)"})
             .planNode();
 
     AssertQueryBuilder query(plan);
@@ -128,13 +138,17 @@ class HashJoinLeftBenchmark : public VectorTestBase {
             core::QueryConfig::kBypassHashProbeBloomFilterMinRows,
             params.enableBloomFilter ? std::to_string(100'000) : std::to_string(0))
         .config(core::QueryConfig::kBypassHashProbeBloomFilterMinPct, std::to_string(85));
-    return query.countResults();
+    auto result = query.copyResults(pool());
+    VELOX_CHECK_EQ(result->size(), 1);
+    VELOX_CHECK_EQ(
+        result->childAt(0)->as<SimpleVector<int64_t>>()->valueAt(0),
+        kNumProbeRows);
   }
 };
 
 std::string benchmarkName(const BenchmarkParams& params) {
   return fmt::format(
-      "build_{}M_probe_50M_hit_{}pct_bloom_{}",
+      "build_{}M_probe_5B_hit_{}pct_bloom_{}",
       params.numBuildRows / 1'000'000,
       params.hitPct,
       params.enableBloomFilter ? "enabled" : "disabled");
@@ -146,6 +160,7 @@ int main(int argc, char** argv) {
   folly::Init init{&argc, &argv};
   memory::MemoryManager::initialize(memory::MemoryManager::Options{});
   functions::prestosql::registerAllScalarFunctions();
+  aggregate::prestosql::registerAllAggregateFunctions();
   parse::registerTypeResolver();
 
   auto benchmark = std::make_unique<HashJoinLeftBenchmark>();
@@ -170,12 +185,10 @@ int main(int argc, char** argv) {
         __FILE__,
         benchmarkName(benchmarkCase.params),
         [&benchmark, &benchmarkCase]() {
-          const auto outputRows = benchmark->run(
+          benchmark->run(
               benchmarkCase.params,
               *benchmarkCase.buildVectors,
               *benchmarkCase.probeVectors);
-          VELOX_CHECK_EQ(outputRows, kNumProbeRows);
-          folly::doNotOptimizeAway(outputRows);
           return 1;
         });
   }
