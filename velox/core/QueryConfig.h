@@ -901,6 +901,8 @@ class QueryConfig {
       "Number of probe rows used to decide whether to bypass the build-side "
       "Bloom filter. 0 disables local Bloom filter probing.")
 
+  /// Bypass the build-side Bloom filter if its acceptance percentage meets
+  /// or exceeds this value. 0 bypasses the Bloom filter without sampling.
   VELOX_QUERY_CONFIG(
       kBypassHashProbeBloomFilterMinPct,
       bypassHashProbeBloomFilterMinPct,
