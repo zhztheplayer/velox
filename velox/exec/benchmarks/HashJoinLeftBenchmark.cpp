@@ -52,8 +52,7 @@ struct BenchmarkCase {
 };
 
 int64_t buildKey(uint64_t row) {
-  return static_cast<int64_t>(
-      folly::hash::twang_mix64(row) & ~uint64_t{1});
+  return static_cast<int64_t>(folly::hash::twang_mix64(row) & ~uint64_t{1});
 }
 
 template <typename MakeBatch>
@@ -70,29 +69,26 @@ std::vector<RowVectorPtr> makeBatches(int64_t numRows, MakeBatch makeBatch) {
 class HashJoinLeftBenchmark : public VectorTestBase {
  public:
   std::vector<RowVectorPtr> prepareBuildData(int64_t numBuildRows) {
-    return makeBatches(
-        numBuildRows, [&](int64_t row, vector_size_t size) {
-          return makeRowVector(
-              {"u0", "u1"},
-              {
-                  makeFlatVector<int64_t>(
-                      size, [&](vector_size_t index) {
-                        return buildKey(row + index);
-                      }),
-                  makeFlatVector<int64_t>(
-                      size, [&](vector_size_t index) { return row + index; }),
-              });
-        });
+    return makeBatches(numBuildRows, [&](int64_t row, vector_size_t size) {
+      return makeRowVector(
+          {"u0", "u1"},
+          {
+              makeFlatVector<int64_t>(
+                  size,
+                  [&](vector_size_t index) { return buildKey(row + index); }),
+              makeFlatVector<int64_t>(
+                  size, [&](vector_size_t index) { return row + index; }),
+          });
+    });
   }
 
   std::vector<RowVectorPtr> prepareProbeData(
       int64_t numBuildRows,
       int32_t hitPct) {
-    auto pattern = makeBatches(
-        kProbePatternRows, [&](int64_t row, vector_size_t size) {
+    auto pattern =
+        makeBatches(kProbePatternRows, [&](int64_t row, vector_size_t size) {
           return makeRowVector(
-              {"t0"},
-              {makeFlatVector<int64_t>(size, [&](vector_size_t index) {
+              {"t0"}, {makeFlatVector<int64_t>(size, [&](vector_size_t index) {
                 const auto probeRow = row + index;
                 const auto random = folly::hash::twang_mix64(probeRow);
                 if (random % 100 < hitPct) {
@@ -103,8 +99,7 @@ class HashJoinLeftBenchmark : public VectorTestBase {
         });
     std::vector<RowVectorPtr> probeVectors;
     for (int32_t repeat = 0; repeat < kProbeRepeats; ++repeat) {
-      probeVectors.insert(
-          probeVectors.end(), pattern.begin(), pattern.end());
+      probeVectors.insert(probeVectors.end(), pattern.begin(), pattern.end());
     }
     return probeVectors;
   }
@@ -114,20 +109,19 @@ class HashJoinLeftBenchmark : public VectorTestBase {
       const std::vector<RowVectorPtr>& buildVectors,
       const std::vector<RowVectorPtr>& probeVectors) {
     auto planNodeIdGenerator = std::make_shared<core::PlanNodeIdGenerator>();
-    auto plan =
-        PlanBuilder(planNodeIdGenerator, pool_.get())
-            .values(probeVectors)
-            .hashJoin(
-                {"t0"},
-                {"u0"},
-                PlanBuilder(planNodeIdGenerator, pool_.get())
-                    .values(buildVectors)
-                    .planNode(),
-                "",
-                {"t0", "u1"},
-                core::JoinType::kLeft)
-            .singleAggregation({}, {"count(1)"})
-            .planNode();
+    auto plan = PlanBuilder(planNodeIdGenerator, pool_.get())
+                    .values(probeVectors)
+                    .hashJoin(
+                        {"t0"},
+                        {"u0"},
+                        PlanBuilder(planNodeIdGenerator, pool_.get())
+                            .values(buildVectors)
+                            .planNode(),
+                        "",
+                        {"t0", "u1"},
+                        core::JoinType::kLeft)
+                    .singleAggregation({}, {"count(1)"})
+                    .planNode();
 
     AssertQueryBuilder query(plan);
     query.maxDrivers(1)
@@ -136,8 +130,11 @@ class HashJoinLeftBenchmark : public VectorTestBase {
             std::to_string(kBloomFilterMaxBytes))
         .config(
             core::QueryConfig::kBypassHashProbeBloomFilterMinRows,
-            params.enableBloomFilter ? std::to_string(100'000) : std::to_string(0))
-        .config(core::QueryConfig::kBypassHashProbeBloomFilterMinPct, std::to_string(85));
+            params.enableBloomFilter ? std::to_string(100'000)
+                                     : std::to_string(0))
+        .config(
+            core::QueryConfig::kBypassHashProbeBloomFilterMinPct,
+            std::to_string(85));
     auto result = query.copyResults(pool());
     VELOX_CHECK_EQ(result->size(), 1);
     VELOX_CHECK_EQ(

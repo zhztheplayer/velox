@@ -1965,8 +1965,7 @@ TEST_P(HashJoinTest, bloomFilterLocalProbe) {
         .buildKeys({"u_k0"})
         .buildVectors({build})
         .joinType(testCase.joinType)
-        .joinOutputLayout(
-            std::vector<std::string>(testCase.outputLayout))
+        .joinOutputLayout(std::vector<std::string>(testCase.outputLayout))
         .referenceQuery(testCase.referenceQuery)
         .config(
             core::QueryConfig::kHashProbeBloomFilterPushdownMaxSize, "1048576")
