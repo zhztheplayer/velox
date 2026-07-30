@@ -42,6 +42,12 @@ struct BenchmarkParams {
   bool enableBloomFilter;
 };
 
+struct BenchmarkCase {
+  BenchmarkParams params;
+  std::shared_ptr<std::vector<RowVectorPtr>> buildVectors;
+  std::shared_ptr<std::vector<RowVectorPtr>> probeVectors;
+};
+
 int64_t buildKey(uint64_t row) {
   return static_cast<int64_t>(
       folly::hash::twang_mix64(row) & ~uint64_t{1});
@@ -143,6 +149,7 @@ int main(int argc, char** argv) {
   parse::registerTypeResolver();
 
   auto benchmark = std::make_unique<HashJoinLeftBenchmark>();
+  std::vector<BenchmarkCase> benchmarkCases;
   for (const auto numBuildRows : {1'000'000, 10'000'000}) {
     auto buildVectors = std::make_shared<std::vector<RowVectorPtr>>(
         benchmark->prepareBuildData(numBuildRows));
@@ -150,23 +157,27 @@ int main(int argc, char** argv) {
       auto probeVectors = std::make_shared<std::vector<RowVectorPtr>>(
           benchmark->prepareProbeData(numBuildRows, hitPct));
       for (const auto enableBloomFilter : {false, true}) {
-        const BenchmarkParams params{
-            numBuildRows, hitPct, enableBloomFilter};
-        folly::addBenchmark(
-            __FILE__,
-            benchmarkName(params),
-            [benchmark = benchmark.get(),
-             params,
+        benchmarkCases.push_back(
+            {{numBuildRows, hitPct, enableBloomFilter},
              buildVectors,
-             probeVectors]() {
-              const auto outputRows =
-                  benchmark->run(params, *buildVectors, *probeVectors);
-              VELOX_CHECK_EQ(outputRows, kNumProbeRows);
-              folly::doNotOptimizeAway(outputRows);
-              return 1;
-            });
+             probeVectors});
       }
     }
+  }
+
+  for (const auto& benchmarkCase : benchmarkCases) {
+    folly::addBenchmark(
+        __FILE__,
+        benchmarkName(benchmarkCase.params),
+        [&benchmark, &benchmarkCase]() {
+          const auto outputRows = benchmark->run(
+              benchmarkCase.params,
+              *benchmarkCase.buildVectors,
+              *benchmarkCase.probeVectors);
+          VELOX_CHECK_EQ(outputRows, kNumProbeRows);
+          folly::doNotOptimizeAway(outputRows);
+          return 1;
+        });
   }
 
   folly::runBenchmarks();
