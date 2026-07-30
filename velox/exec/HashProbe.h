@@ -460,6 +460,7 @@ class HashProbe : public Operator {
 
   folly::F14FastSet<column_index_t> dynamicFiltersProducedOnChannels_;
 
+  // Build-side Bloom filter bypass configuration, state, and metrics.
   const int32_t bypassBloomFilterMinRows_;
   const int32_t bypassBloomFilterMinPct_;
   bool bypassBloomFilter_;
