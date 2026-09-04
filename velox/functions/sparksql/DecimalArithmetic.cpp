@@ -14,9 +14,18 @@
  * limitations under the License.
  */
 
+#include <folly/container/F14Map.h>
+
+#include "velox/vector/DecodedVector.h"
+#include "velox/expression/ExprRewriteRegistry.h"
+#include "velox/expression/FunctionCallToSpecialForm.h"
+#include "velox/expression/SpecialForm.h"
+#include "velox/expression/SpecialFormRegistry.h"
 #include "velox/functions/Macros.h"
 #include "velox/functions/Registerer.h"
 #include "velox/functions/sparksql/DecimalUtil.h"
+
+#include <folly/Likely.h>
 
 namespace facebook::velox::functions::sparksql {
 namespace {
@@ -776,6 +785,294 @@ template <typename TExec>
 using CheckedMultiplyFunctionDenyPrecisionLoss =
     CheckedDecimalMultiplyFunction<TExec, false>;
 
+enum class DecimalBinaryOperation { kAdd, kSubtract, kMultiply, kDivide };
+
+std::optional<TypePtr> sparkDecimalTypeForIntegral(const TypePtr& type) {
+  if (type->isDecimal()) {
+    return std::nullopt;
+  }
+  switch (type->kind()) {
+    case TypeKind::TINYINT:
+      return DECIMAL(3, 0);
+    case TypeKind::SMALLINT:
+      return DECIMAL(5, 0);
+    case TypeKind::INTEGER:
+      return DECIMAL(10, 0);
+    case TypeKind::BIGINT:
+      return DECIMAL(20, 0);
+    default:
+      return std::nullopt;
+  }
+}
+
+core::TypedExprPtr unwrapSparkIntegralDecimalCast(
+    const core::TypedExprPtr& expr) {
+  if (!expr->isCastKind() || !expr->type()->isDecimal()) {
+    return nullptr;
+  }
+  const auto* cast = expr->asUnchecked<core::CastTypedExpr>();
+  const auto& input = expr->inputs().front();
+  const auto decimalType = sparkDecimalTypeForIntegral(input->type());
+  if (cast->isTryCast() || !decimalType ||
+      !expr->type()->equivalent(**decimalType)) {
+    return nullptr;
+  }
+  return input;
+}
+
+template <typename T, bool isIntegral>
+using DecimalKernelInput = std::conditional_t<
+    isIntegral,
+    std::conditional_t<std::is_same_v<T, int64_t>, int128_t, int64_t>,
+    T>;
+
+template <typename Callback>
+exec::ExprPtr dispatchFusedDecimalInput(
+    const TypePtr& type,
+    Callback&& callback) {
+  if (type->isShortDecimal()) {
+    return callback.template operator()<int64_t, false>();
+  }
+  if (type->isLongDecimal()) {
+    return callback.template operator()<int128_t, false>();
+  }
+  switch (type->kind()) {
+    case TypeKind::TINYINT:
+      return callback.template operator()<int8_t, true>();
+    case TypeKind::SMALLINT:
+      return callback.template operator()<int16_t, true>();
+    case TypeKind::INTEGER:
+      return callback.template operator()<int32_t, true>();
+    case TypeKind::BIGINT:
+      return callback.template operator()<int64_t, true>();
+    default:
+      VELOX_UNREACHABLE(
+          "Unsupported fused decimal input: {}", type->toString());
+  }
+}
+
+template <typename A, bool aIsIntegral, typename B, bool bIsIntegral, typename R>
+class FusedDecimalBinaryExpr final : public exec::SpecialForm {
+ public:
+  FusedDecimalBinaryExpr(
+      TypePtr type,
+      std::vector<exec::ExprPtr> inputs,
+      std::vector<TypePtr> logicalInputTypes,
+      DecimalBinaryOperation operation,
+      bool allowPrecisionLoss,
+      bool trackCpuUsage,
+      const core::QueryConfig& config)
+      : SpecialForm(
+            exec::SpecialFormKind::kCustom,
+            std::move(type),
+            std::move(inputs),
+            "$internal$fused_decimal_binary",
+            false,
+            trackCpuUsage),
+        logicalInputTypes_(std::move(logicalInputTypes)),
+        operation_(operation),
+        allowPrecisionLoss_(allowPrecisionLoss),
+        config_(config) {}
+
+  void evalSpecialForm(
+      const SelectivityVector& rows,
+      exec::EvalCtx& context,
+      VectorPtr& result) override {
+    VectorPtr left;
+    VectorPtr right;
+    inputs_[0]->eval(rows, context, left);
+    inputs_[1]->eval(rows, context, right);
+
+    exec::LocalDecodedVector decodedLeft(context, *left, rows);
+    exec::LocalDecodedVector decodedRight(context, *right, rows);
+    context.ensureWritable(rows, type(), result);
+    apply(rows, *decodedLeft, *decodedRight, result, context);
+  }
+
+ private:
+  void computePropagatesNulls() override {
+    propagatesNulls_ = true;
+  }
+
+  template <typename Kernel>
+  void applyKernel(
+      Kernel& kernel,
+      const SelectivityVector& rows,
+      DecodedVector& left,
+      DecodedVector& right,
+      FlatVector<R>* result,
+      exec::EvalCtx& context) const {
+    using KernelA = DecimalKernelInput<A, aIsIntegral>;
+    using KernelB = DecimalKernelInput<B, bIsIntegral>;
+    int128_t* unused = nullptr;
+    kernel.initialize(logicalInputTypes_, config_, unused, unused);
+    auto* rawResult = result->mutableRawValues();
+    auto applyRow = [&](vector_size_t row) {
+      const auto a = static_cast<KernelA>(left.valueAt<A>(row));
+      const auto b = static_cast<KernelB>(right.valueAt<B>(row));
+      if (FOLLY_UNLIKELY(!kernel.template call<R, KernelA, KernelB>(
+              rawResult[row], a, b))) {
+        result->setNull(row, true);
+      }
+    };
+
+    if (!left.mayHaveNulls() && !right.mayHaveNulls()) {
+      result->clearNulls(rows);
+      context.applyToSelectedNoThrow(rows, applyRow);
+      return;
+    }
+
+    exec::LocalSelectivityVector nonNullRowsHolder(context, rows);
+    auto* nonNullRows = nonNullRowsHolder.get();
+    if (left.mayHaveNulls()) {
+      nonNullRows->deselectNulls(left.nulls(&rows), rows.begin(), rows.end());
+    }
+    if (right.mayHaveNulls()) {
+      nonNullRows->deselectNulls(right.nulls(&rows), rows.begin(), rows.end());
+    }
+    nonNullRows->updateBounds();
+
+    result->clearNulls(rows);
+    result->addNulls(nonNullRows->asRange().bits(), rows);
+    if (nonNullRows->hasSelections()) {
+      context.applyToSelectedNoThrow(*nonNullRows, applyRow);
+    }
+  }
+
+  void apply(
+      const SelectivityVector& rows,
+      DecodedVector& left,
+      DecodedVector& right,
+      VectorPtr& result,
+      exec::EvalCtx& context) const {
+    auto* flatResult = result->asFlatVector<R>();
+    if (operation_ == DecimalBinaryOperation::kAdd) {
+      if (allowPrecisionLoss_) {
+        DecimalAddFunction<exec::VectorExec, true> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      } else {
+        DecimalAddFunction<exec::VectorExec, false> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      }
+    } else if (operation_ == DecimalBinaryOperation::kSubtract) {
+      if (allowPrecisionLoss_) {
+        DecimalSubtractFunction<exec::VectorExec, true> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      } else {
+        DecimalSubtractFunction<exec::VectorExec, false> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      }
+    } else if (operation_ == DecimalBinaryOperation::kMultiply) {
+      if (allowPrecisionLoss_) {
+        DecimalMultiplyFunction<exec::VectorExec, true> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      } else {
+        DecimalMultiplyFunction<exec::VectorExec, false> kernel;
+        applyKernel(kernel, rows, left, right, flatResult, context);
+      }
+    } else if (allowPrecisionLoss_) {
+      DecimalDivideFunction<exec::VectorExec, true> kernel;
+      applyKernel(kernel, rows, left, right, flatResult, context);
+    } else {
+      DecimalDivideFunction<exec::VectorExec, false> kernel;
+      applyKernel(kernel, rows, left, right, flatResult, context);
+    }
+  }
+
+  const std::vector<TypePtr> logicalInputTypes_;
+  const DecimalBinaryOperation operation_;
+  const bool allowPrecisionLoss_;
+  const core::QueryConfig& config_;
+};
+
+class FusedDecimalBinaryCallToSpecialForm final
+    : public exec::FunctionCallToSpecialForm {
+ public:
+  FusedDecimalBinaryCallToSpecialForm(
+      DecimalBinaryOperation operation,
+      bool allowPrecisionLoss)
+      : operation_(operation), allowPrecisionLoss_(allowPrecisionLoss) {}
+
+  TypePtr resolveType(const std::vector<TypePtr>&) override {
+    VELOX_UNREACHABLE("Internal fused decimal calls are created after typing");
+  }
+
+  exec::ExprPtr constructSpecialForm(
+      const TypePtr& type,
+      std::vector<exec::ExprPtr>&& inputs,
+      bool trackCpuUsage,
+      const core::QueryConfig& config) override {
+    VELOX_CHECK_EQ(inputs.size(), 2);
+    std::vector<TypePtr> logicalInputTypes;
+    logicalInputTypes.reserve(2);
+    int32_t numIntegralInputs = 0;
+    for (const auto& input : inputs) {
+      if (auto decimalType = sparkDecimalTypeForIntegral(input->type())) {
+        logicalInputTypes.push_back(std::move(*decimalType));
+        ++numIntegralInputs;
+      } else {
+        VELOX_CHECK(input->type()->isDecimal());
+        logicalInputTypes.push_back(input->type());
+      }
+    }
+    VELOX_CHECK_EQ(numIntegralInputs, 1);
+    return dispatchFusedDecimalInput(
+        inputs[0]->type(), [&]<typename A, bool aIsIntegral>() {
+          return dispatchFusedDecimalInput(
+              inputs[1]->type(), [&]<typename B, bool bIsIntegral>() {
+                return makeExpr<A, aIsIntegral, B, bIsIntegral>(
+                    type,
+                    std::move(inputs),
+                    std::move(logicalInputTypes),
+                    trackCpuUsage,
+                    config);
+              });
+        });
+  }
+
+ private:
+  template <typename A, bool aIsIntegral, typename B, bool bIsIntegral>
+  exec::ExprPtr makeExpr(
+      const TypePtr& type,
+      std::vector<exec::ExprPtr> inputs,
+      std::vector<TypePtr> logicalInputTypes,
+      bool trackCpuUsage,
+      const core::QueryConfig& config) const {
+    if (type->isShortDecimal()) {
+      return std::make_shared<FusedDecimalBinaryExpr<
+          A,
+          aIsIntegral,
+          B,
+          bIsIntegral,
+          int64_t>>(
+          type,
+          std::move(inputs),
+          std::move(logicalInputTypes),
+          operation_,
+          allowPrecisionLoss_,
+          trackCpuUsage,
+          config);
+    }
+    VELOX_CHECK(type->isLongDecimal());
+    return std::make_shared<FusedDecimalBinaryExpr<
+        A,
+        aIsIntegral,
+        B,
+        bIsIntegral,
+        int128_t>>(
+        type,
+        std::move(inputs),
+        std::move(logicalInputTypes),
+        operation_,
+        allowPrecisionLoss_,
+        trackCpuUsage,
+        config);
+  }
+
+  const DecimalBinaryOperation operation_;
+  const bool allowPrecisionLoss_;
+};
+
 std::vector<exec::SignatureVariable> getDivideConstraintsDenyPrecisionLoss() {
   std::string wholeDigits = fmt::format(
       "min(38, {a_precision} - {a_scale} + {b_scale})",
@@ -925,5 +1222,87 @@ void registerDecimalIntegralDivide(const std::string& prefix) {
   registerIntegralDecimalDivide<DecimalIntegralDivideFunction>(prefix + "div");
   registerIntegralDecimalDivide<CheckedDecimalIntegralDivideFunction>(
       prefix + "checked_div");
+}
+
+void registerFusedDecimalBinaryFunctions(const std::string& prefix) {
+  struct RewriteSpec {
+    std::string internalName;
+    DecimalBinaryOperation operation;
+    bool allowPrecisionLoss;
+  };
+
+  const std::vector<std::pair<std::string, RewriteSpec>> specs = {
+      {prefix + "add",
+       {prefix + "$internal$fused_decimal_add",
+        DecimalBinaryOperation::kAdd,
+        true}},
+      {prefix + "add" + kDenyPrecisionLoss,
+       {prefix + "$internal$fused_decimal_add_deny_precision_loss",
+        DecimalBinaryOperation::kAdd,
+        false}},
+      {prefix + "subtract",
+       {prefix + "$internal$fused_decimal_subtract",
+        DecimalBinaryOperation::kSubtract,
+        true}},
+      {prefix + "subtract" + kDenyPrecisionLoss,
+       {prefix + "$internal$fused_decimal_subtract_deny_precision_loss",
+        DecimalBinaryOperation::kSubtract,
+        false}},
+      {prefix + "multiply",
+       {prefix + "$internal$fused_decimal_multiply",
+        DecimalBinaryOperation::kMultiply,
+        true}},
+      {prefix + "multiply" + kDenyPrecisionLoss,
+       {prefix + "$internal$fused_decimal_multiply_deny_precision_loss",
+        DecimalBinaryOperation::kMultiply,
+        false}},
+      {prefix + "divide",
+       {prefix + "$internal$fused_decimal_divide",
+        DecimalBinaryOperation::kDivide,
+        true}},
+      {prefix + "divide" + kDenyPrecisionLoss,
+       {prefix + "$internal$fused_decimal_divide_deny_precision_loss",
+        DecimalBinaryOperation::kDivide,
+        false}},
+  };
+
+  folly::F14FastMap<std::string, std::string> rewrites;
+  for (const auto& [functionName, spec] : specs) {
+    exec::registerFunctionCallToSpecialForm(
+        spec.internalName,
+        std::make_unique<FusedDecimalBinaryCallToSpecialForm>(
+            spec.operation, spec.allowPrecisionLoss));
+    rewrites.emplace(functionName, spec.internalName);
+  }
+
+  expression::ExprRewriteRegistry::instance().registerRewrite(
+      [rewrites = std::move(rewrites)](
+          const core::TypedExprPtr& expr) -> core::TypedExprPtr {
+        if (!expr->isCallKind() || expr->inputs().size() != 2) {
+          return nullptr;
+        }
+        const auto* call = expr->asUnchecked<core::CallTypedExpr>();
+        const auto it = rewrites.find(call->name());
+        if (it == rewrites.end()) {
+          return nullptr;
+        }
+
+        auto inputs = call->inputs();
+        bool removedCast = false;
+        for (auto& input : inputs) {
+          if (auto integral = unwrapSparkIntegralDecimalCast(input)) {
+            input = std::move(integral);
+            removedCast = true;
+          }
+        }
+        if (!removedCast ||
+            (!inputs[0]->type()->isDecimal() &&
+             !inputs[1]->type()->isDecimal())) {
+          return nullptr;
+        }
+
+        return std::make_shared<core::CallTypedExpr>(
+            expr->type(), std::move(inputs), it->second);
+      });
 }
 } // namespace facebook::velox::functions::sparksql

@@ -29,4 +29,8 @@ void registerDecimalDivide(const std::string& prefix);
 
 void registerDecimalIntegralDivide(const std::string& prefix);
 
+/// Registers an expression rewrite that fuses Spark's lossless
+/// integral-to-decimal casts into decimal binary arithmetic.
+void registerFusedDecimalBinaryFunctions(const std::string& prefix);
+
 } // namespace facebook::velox::functions::sparksql

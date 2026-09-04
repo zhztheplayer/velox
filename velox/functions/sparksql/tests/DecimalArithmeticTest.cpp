@@ -356,6 +356,18 @@ class DecimalArithmeticTest : public SparkFunctionBaseTest {
   }
 };
 
+TEST_F(DecimalArithmeticTest, fusedIntegralDecimalCast) {
+  auto input = makeRowVector(
+      {"quantity", "price"},
+      {makeFlatVector<int32_t>({2, 3, 4}),
+       makeFlatVector<int64_t>({300, 250, 125}, DECIMAL(12, 2))});
+
+  auto result = evaluate(
+      "multiply(cast(quantity as decimal(10, 0)), price)", input);
+  assertEqualVectors(
+      makeFlatVector<int128_t>({600, 750, 500}, DECIMAL(23, 2)), result);
+}
+
 TEST_F(DecimalArithmeticTest, add) {
   // Precision < 38.
   testArithmeticFunction(
