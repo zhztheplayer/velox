@@ -1288,16 +1288,15 @@ void registerFusedDecimalBinaryFunctions(const std::string& prefix) {
         }
 
         auto inputs = call->inputs();
-        bool removedCast = false;
+        int32_t numUnwrappedCasts = 0;
         for (auto& input : inputs) {
           if (auto integral = unwrapSparkIntegralDecimalCast(input)) {
             input = std::move(integral);
-            removedCast = true;
+            ++numUnwrappedCasts;
           }
         }
-        if (!removedCast ||
-            (!inputs[0]->type()->isDecimal() &&
-             !inputs[1]->type()->isDecimal())) {
+        // Fuse only mixed integral-decimal arithmetic.
+        if (numUnwrappedCasts != 1) {
           return nullptr;
         }
 
