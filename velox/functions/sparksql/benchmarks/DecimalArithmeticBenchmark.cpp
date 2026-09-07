@@ -40,9 +40,7 @@ int main(int argc, char** argv) {
       isNullAt = [](auto row) { return row % 10 == 0; };
     }
     auto quantity = vectorMaker.flatVector<int32_t>(
-        kVectorSize,
-        [](auto row) { return row % 100 + 1; },
-        isNullAt);
+        kVectorSize, [](auto row) { return row % 100 + 1; }, isNullAt);
     auto decimalQuantity = vectorMaker.flatVector<int64_t>(
         kVectorSize,
         [](auto row) { return row % 100 + 1; },

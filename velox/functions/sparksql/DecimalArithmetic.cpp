@@ -16,7 +16,6 @@
 
 #include <folly/container/F14Map.h>
 
-#include "velox/vector/DecodedVector.h"
 #include "velox/expression/ExprRewriteRegistry.h"
 #include "velox/expression/FunctionCallToSpecialForm.h"
 #include "velox/expression/SpecialForm.h"
@@ -24,6 +23,7 @@
 #include "velox/functions/Macros.h"
 #include "velox/functions/Registerer.h"
 #include "velox/functions/sparksql/DecimalUtil.h"
+#include "velox/vector/DecodedVector.h"
 
 #include <folly/Likely.h>
 
@@ -851,7 +851,12 @@ exec::ExprPtr dispatchFusedDecimalInput(
   }
 }
 
-template <typename A, bool aIsIntegral, typename B, bool bIsIntegral, typename R>
+template <
+    typename A,
+    bool aIsIntegral,
+    typename B,
+    bool bIsIntegral,
+    typename R>
 class FusedDecimalBinaryExpr final : public exec::SpecialForm {
  public:
   FusedDecimalBinaryExpr(
@@ -1039,12 +1044,8 @@ class FusedDecimalBinaryCallToSpecialForm final
       bool trackCpuUsage,
       const core::QueryConfig& config) const {
     if (type->isShortDecimal()) {
-      return std::make_shared<FusedDecimalBinaryExpr<
-          A,
-          aIsIntegral,
-          B,
-          bIsIntegral,
-          int64_t>>(
+      return std::make_shared<
+          FusedDecimalBinaryExpr<A, aIsIntegral, B, bIsIntegral, int64_t>>(
           type,
           std::move(inputs),
           std::move(logicalInputTypes),
@@ -1054,12 +1055,8 @@ class FusedDecimalBinaryCallToSpecialForm final
           config);
     }
     VELOX_CHECK(type->isLongDecimal());
-    return std::make_shared<FusedDecimalBinaryExpr<
-        A,
-        aIsIntegral,
-        B,
-        bIsIntegral,
-        int128_t>>(
+    return std::make_shared<
+        FusedDecimalBinaryExpr<A, aIsIntegral, B, bIsIntegral, int128_t>>(
         type,
         std::move(inputs),
         std::move(logicalInputTypes),
