@@ -358,29 +358,43 @@ class DecimalArithmeticTest : public SparkFunctionBaseTest {
 
 TEST_F(DecimalArithmeticTest, fusedIntegralDecimalCast) {
   auto input = makeRowVector(
-      {"quantity", "price"},
+      {"quantity", "bigint_quantity", "price"},
       {makeFlatVector<int32_t>({2, 3, 4}),
+       makeFlatVector<int64_t>({10'000'000'000, -4'000'000'000, 9}),
        makeFlatVector<int64_t>({300, 250, 125}, DECIMAL(12, 2))});
 
-  auto result =
-      evaluate("multiply(cast(quantity as decimal(10, 0)), price)", input);
   assertEqualVectors(
-      makeFlatVector<int128_t>({600, 750, 500}, DECIMAL(23, 2)), result);
+      makeFlatVector<int128_t>({600, 750, 500}, DECIMAL(23, 2)),
+      evaluate("multiply(cast(quantity as decimal(10, 0)), price)", input));
+  assertEqualVectors(
+      makeFlatVector<int128_t>(
+          {3'000'000'000'000, -1'000'000'000'000, 1'125},
+          DECIMAL(33, 2)),
+      evaluate(
+          "multiply(cast(bigint_quantity as decimal(20, 0)), price)",
+          input));
 }
 
 TEST_F(DecimalArithmeticTest, fusedIntegralDecimalCastWithNulls) {
   auto input = makeRowVector(
-      {"quantity", "price"},
+      {"quantity", "bigint_quantity", "price"},
       {makeNullableFlatVector<int32_t>({2, std::nullopt, 4, 5, 6}),
+       makeNullableFlatVector<int64_t>(
+           {10'000'000'000, std::nullopt, -4'000'000'000, 5, 9}),
        makeNullableFlatVector<int64_t>(
            {300, 250, std::nullopt, 125, 100}, DECIMAL(12, 2))});
 
-  auto result =
-      evaluate("multiply(cast(quantity as decimal(10, 0)), price)", input);
   assertEqualVectors(
       makeNullableFlatVector<int128_t>(
           {600, std::nullopt, std::nullopt, 625, 600}, DECIMAL(23, 2)),
-      result);
+      evaluate("multiply(cast(quantity as decimal(10, 0)), price)", input));
+  assertEqualVectors(
+      makeNullableFlatVector<int128_t>(
+          {3'000'000'000'000, std::nullopt, std::nullopt, 625, 900},
+          DECIMAL(33, 2)),
+      evaluate(
+          "multiply(cast(bigint_quantity as decimal(20, 0)), price)",
+          input));
 }
 
 TEST_F(DecimalArithmeticTest, add) {
