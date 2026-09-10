@@ -221,6 +221,18 @@ target_link_libraries(
   Folly::follybenchmark
 )
 
+add_executable(velox_hash_aggregation_benchmark HashAggregationBenchmark.cpp)
+
+target_link_libraries(
+  velox_hash_aggregation_benchmark
+  velox_memory
+  velox_aggregates
+  velox_exec
+  velox_exec_test_lib
+  velox_vector_test_lib
+  Folly::follybenchmark
+)
+
 add_executable(velox_exec_bm_duplicate_project DuplicateProjectBenchmark.cpp)
 
 target_link_libraries(
