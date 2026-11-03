@@ -336,13 +336,18 @@ AssertQueryBuilder::readCursor() {
                              .build();
     }
   }
+  // Pass copies, because each call replaces the previous configs and a later
+  // run on this builder would otherwise lose the ones set before this run.
   if (!configs_.empty()) {
-    params_.queryCtx->testingOverrideConfigUnsafe(std::move(configs_));
+    params_.queryCtx->testingOverrideConfigUnsafe(
+        std::unordered_map<std::string, std::string>(configs_));
   }
   if (!connectorSessionProperties_.empty()) {
-    for (auto& [connectorId, sessionProperties] : connectorSessionProperties_) {
+    for (const auto& [connectorId, sessionProperties] :
+         connectorSessionProperties_) {
       params_.queryCtx->setConnectorSessionOverridesUnsafe(
-          connectorId, std::move(sessionProperties));
+          connectorId,
+          std::unordered_map<std::string, std::string>(sessionProperties));
     }
   }
 

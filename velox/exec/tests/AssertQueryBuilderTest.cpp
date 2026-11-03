@@ -94,6 +94,29 @@ TEST_F(AssertQueryBuilderTest, config) {
       .assertResults("VALUES (2), (4), (6)");
 }
 
+TEST_F(AssertQueryBuilderTest, configAcrossRuns) {
+  auto data = makeRowVector({makeFlatVector<int32_t>({1, 2, 3})});
+
+  AssertQueryBuilder builder(
+      PlanBuilder().values({data}).planNode(), duckDbQueryRunner_);
+  builder.config(core::QueryConfig::kMaxOutputBatchRows, "2")
+      .connectorSessionProperty(kHiveConnectorId, "first", "1");
+  builder.assertResults("VALUES (1), (2), (3)");
+
+  builder.config(core::QueryConfig::kPreferredOutputBatchRows, "3")
+      .connectorSessionProperty(kHiveConnectorId, "second", "2");
+  const auto task = builder.assertResults("VALUES (1), (2), (3)");
+
+  const auto& queryConfig = task->queryCtx()->queryConfig();
+  EXPECT_EQ(queryConfig.maxOutputBatchRows(), 2);
+  EXPECT_EQ(queryConfig.preferredOutputBatchRows(), 3);
+
+  const auto& sessionProperties =
+      task->queryCtx()->connectorSessionProperties().at(kHiveConnectorId);
+  EXPECT_EQ(sessionProperties->get<std::string>("first"), "1");
+  EXPECT_EQ(sessionProperties->get<std::string>("second"), "2");
+}
+
 TEST_F(AssertQueryBuilderTest, hiveSplits) {
   auto data = makeRowVector({"c0"}, {makeFlatVector<int32_t>({1, 2, 3})});
 
